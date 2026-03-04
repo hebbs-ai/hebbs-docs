@@ -1,0 +1,55 @@
+---
+const groups = [
+  {
+    title: "Write",
+    ops: [
+      { name: "remember()", desc: "Store a memory with importance scoring and structured context." },
+      { name: "revise()", desc: "Update a belief. Replaces, not appends. Full revision history." },
+      { name: "forget()", desc: "Prune by staleness, irrelevance, or compliance. GDPR-proof." },
+    ],
+  },
+  {
+    title: "Read",
+    ops: [
+      { name: "recall()", desc: "Retrieve by similarity, time, causation, or analogy. 4 strategies." },
+      { name: "prime()", desc: "Pre-load relevant context before an agent turn. For frameworks." },
+      { name: "subscribe()", desc: "Real-time push. Memory surfaces automatically as it becomes relevant." },
+    ],
+  },
+  {
+    title: "Consolidate",
+    ops: [
+      { name: "reflect_policy()", desc: "Configure automatic background consolidation triggers." },
+      { name: "reflect()", desc: "Manual trigger for on-demand memory consolidation." },
+      { name: "insights()", desc: "Query distilled knowledge produced by reflection." },
+    ],
+  },
+];
+---
+
+<section id="operations" class="py-20 md:py-32 border-t border-border/50">
+  <div class="mx-auto max-w-6xl px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">
+        Nine operations. Three groups.
+      </h2>
+      <p class="text-muted text-lg">The complete API for agent memory.</p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8">
+      {groups.map((group) => (
+        <div>
+          <h3 class="font-mono text-xs uppercase tracking-wider text-accent mb-6">{group.title}</h3>
+          <div class="space-y-4">
+            {group.ops.map((op) => (
+              <div class="rounded-lg border border-border bg-surface/40 p-4">
+                <p class="font-mono text-sm font-medium text-cyan mb-2">{op.name}</p>
+                <p class="text-sm text-muted leading-relaxed">{op.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

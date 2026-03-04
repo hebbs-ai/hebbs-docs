@@ -1,0 +1,128 @@
+---
+const redisComparison = [
+  { op: "Write", hebbs: "384 ns", redis: "95,000 ns", factor: "247x" },
+  { op: "Read", hebbs: "114 ns", redis: "95,000 ns", factor: "833x" },
+  { op: "Delete", hebbs: "84 ns", redis: "95,000 ns", factor: "1,131x" },
+];
+
+const scalability = [
+  { memories: "100K", similarity: "3ms", temporal: "0.6ms" },
+  { memories: "1M", similarity: "5ms", temporal: "0.8ms" },
+  { memories: "10M", similarity: "8ms", temporal: "1.2ms" },
+  { memories: "100M", similarity: "12ms", temporal: "2.0ms" },
+];
+
+const systemBench = [
+  { op: "remember", p50: "0.8ms", p99: "4ms" },
+  { op: "recall (similarity)", p50: "2ms", p99: "8ms" },
+  { op: "recall (temporal)", p50: "0.5ms", p99: "2ms" },
+  { op: "recall (causal)", p50: "4ms", p99: "12ms" },
+  { op: "recall (multi-strategy)", p50: "6ms", p99: "18ms" },
+  { op: "subscribe (push)", p50: "1ms", p99: "5ms" },
+];
+---
+
+<section id="benchmarks" class="py-20 md:py-32 border-t border-border/50">
+  <div class="mx-auto max-w-6xl px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">
+        Faster than Redis. And it does 100x more.
+      </h2>
+      <p class="text-muted text-lg">
+        Raw storage measured in nanoseconds. Cognitive recall measured in milliseconds.
+      </p>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-8 mb-16">
+      <!-- Redis comparison -->
+      <div class="rounded-xl border border-border bg-surface/40 p-6 md:p-8">
+        <h3 class="font-mono text-xs uppercase tracking-wider text-accent mb-6">
+          Raw storage — HEBBS vs Redis
+        </h3>
+        <div class="space-y-4">
+          {redisComparison.map((row) => (
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm text-muted">{row.op}</span>
+                <span class="font-mono text-sm text-green font-medium">{row.factor} faster</span>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-3">
+                  <span class="font-mono text-xs text-accent w-12">HEBBS</span>
+                  <div class="h-2 rounded-full bg-accent/80" style={`width: ${row.op === 'Write' ? '2' : row.op === 'Read' ? '0.6' : '0.4'}%`}></div>
+                  <span class="font-mono text-xs text-accent">{row.hebbs}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="font-mono text-xs text-muted w-12">Redis</span>
+                  <div class="h-2 rounded-full bg-muted/30 flex-1"></div>
+                  <span class="font-mono text-xs text-muted">{row.redis}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p class="text-xs text-muted mt-6 pt-4 border-t border-border">
+          Redis: redis-benchmark, 50 clients, 100B values, localhost.
+          HEBBS: in-memory backend, release build, 200B structured memories.
+        </p>
+      </div>
+
+      <!-- System benchmarks -->
+      <div class="rounded-xl border border-border bg-surface/40 p-6 md:p-8">
+        <h3 class="font-mono text-xs uppercase tracking-wider text-accent mb-6">
+          Full system — 10M memories, 2 vCPU
+        </h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border">
+                <th class="text-left text-muted font-normal pb-3">Operation</th>
+                <th class="text-right text-muted font-normal pb-3">p50</th>
+                <th class="text-right text-muted font-normal pb-3">p99</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemBench.map((row) => (
+                <tr class="border-b border-border/50">
+                  <td class="py-3 font-mono text-cyan text-xs">{row.op}</td>
+                  <td class="py-3 text-right font-mono text-accent">{row.p50}</td>
+                  <td class="py-3 text-right font-mono text-accent">{row.p99}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="text-xs text-muted mt-4 pt-4 border-t border-border">
+          Single c6g.large instance (2 vCPU, 4GB RAM). Includes embedding, index lookup, deserialization.
+        </p>
+      </div>
+    </div>
+
+    <!-- Scalability -->
+    <div class="rounded-xl border border-border bg-surface/40 p-6 md:p-8">
+      <h3 class="font-mono text-xs uppercase tracking-wider text-accent mb-6">
+        Recall latency at scale (p99)
+      </h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-border">
+              <th class="text-left text-muted font-normal pb-3">Memories stored</th>
+              <th class="text-right text-muted font-normal pb-3">Similarity recall</th>
+              <th class="text-right text-muted font-normal pb-3">Temporal recall</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scalability.map((row) => (
+              <tr class="border-b border-border/50">
+                <td class="py-3 font-mono font-medium text-text">{row.memories}</td>
+                <td class="py-3 text-right font-mono text-accent">{row.similarity}</td>
+                <td class="py-3 text-right font-mono text-accent">{row.temporal}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,68 @@
+---
+const capabilities = [
+  { name: "Multi-strategy recall", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+  { name: "Native decay & reinforcement", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+  { name: "Background consolidation", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+  { name: "Causal reasoning", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+  { name: "Single binary, zero deps", hebbs: true, pgvector: false, qdrant: true, redis: true, neo4j: false, mem0: false },
+  { name: "GDPR-proof deletion", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+  { name: "Sub-microsecond storage", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+  { name: "Embedded mode (no server)", hebbs: true, pgvector: false, qdrant: false, redis: false, neo4j: false, mem0: false },
+];
+
+const products = [
+  { key: "hebbs", label: "HEBBS" },
+  { key: "pgvector", label: "pgvector" },
+  { key: "qdrant", label: "Qdrant" },
+  { key: "redis", label: "Redis" },
+  { key: "neo4j", label: "Neo4j" },
+  { key: "mem0", label: "Mem0" },
+];
+---
+
+<section class="py-20 md:py-32 border-t border-border/50">
+  <div class="mx-auto max-w-6xl px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-4">
+        Why not just use...
+      </h2>
+      <p class="text-muted text-lg">
+        HEBBS isn't competing with these tools. It's the primitive they're missing.
+      </p>
+    </div>
+
+    <div class="rounded-xl border border-border bg-surface/40 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-border">
+            <th class="text-left text-muted font-normal py-4 px-6 min-w-[200px]">Capability</th>
+            {products.map((p) => (
+              <th class={`text-center font-mono text-xs py-4 px-4 min-w-[80px] ${p.key === 'hebbs' ? 'text-accent font-medium' : 'text-muted font-normal'}`}>
+                {p.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {capabilities.map((cap) => (
+            <tr class="border-b border-border/50">
+              <td class="py-3 px-6 text-text text-sm">{cap.name}</td>
+              {products.map((p) => {
+                const val = cap[p.key as keyof typeof cap];
+                return (
+                  <td class="py-3 px-4 text-center">
+                    {val ? (
+                      <span class={p.key === 'hebbs' ? 'text-accent' : 'text-green'}>&#10003;</span>
+                    ) : (
+                      <span class="text-muted/40">&mdash;</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
