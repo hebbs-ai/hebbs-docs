@@ -7,10 +7,10 @@
 #   - hebbs-bench   (in-situ performance validation)
 #
 # Build:
-#   docker buildx build --platform linux/amd64,linux/arm64 -t hebbs/hebbs .
+#   docker buildx build --platform linux/amd64,linux/arm64 -t hebbs-ai/hebbs .
 #
 # Run:
-#   docker run -p 6380:6380 -p 6381:6381 -v hebbs-data:/data hebbs/hebbs
+#   docker run -p 6380:6380 -p 6381:6381 -v hebbs-data:/data hebbs-ai/hebbs
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: Build ───────────────────────────────────────────────────────────
@@ -44,8 +44,8 @@ FROM gcr.io/distroless/cc-debian12:nonroot
 
 LABEL org.opencontainers.image.title="HEBBS" \
       org.opencontainers.image.description="Cognitive memory engine for AI agents" \
-      org.opencontainers.image.url="https://github.com/hebbs/hebbs" \
-      org.opencontainers.image.source="https://github.com/hebbs/hebbs" \
+      org.opencontainers.image.url="https://github.com/hebbs-ai/hebbs" \
+      org.opencontainers.image.source="https://github.com/hebbs-ai/hebbs" \
       org.opencontainers.image.vendor="HEBBS" \
       org.opencontainers.image.licenses="BSL-1.1"
 

@@ -21,7 +21,7 @@ edition = "2021"
 rust-version = "1.75"
 # License is set per-crate: BSL-1.1 for engine, Apache-2.0 for client SDKs.
 # See LICENSE-BSL and LICENSE-APACHE at the repo root.
-repository = "https://github.com/hebbs/hebbs"
+repository = "https://github.com/hebbs-ai/hebbs"
 
 [workspace.dependencies]
 thiserror = "2"

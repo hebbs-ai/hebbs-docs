@@ -11,7 +11,7 @@ HEBBS is a memory primitive purpose-built for AI agents. It replaces the patchwo
 Vector search tells your agent what's *similar*. HEBBS tells your agent what *happened*, what *caused* it, and what *worked before*.
 
 ```bash
-curl -sSf https://hebbs.io/install | sh
+curl -sSf https://hebbs.ai/install | sh
 hebbs-server
 ```
 
@@ -38,10 +38,10 @@ HEBBS moves beyond storage into cognition: importance-driven encoding, multi-pat
 
 ```bash
 # macOS / Linux
-curl -sSf https://hebbs.io/install | sh
+curl -sSf https://hebbs.ai/install | sh
 
 # Docker
-docker run -p 6380:6380 hebbs/hebbs
+docker run -p 6380:6380 hebbs-ai/hebbs
 
 # Or embed as a library (no separate process)
 pip install hebbs
@@ -259,7 +259,7 @@ Same API, different configuration. A Jetson Orin, MacBook, or Intel laptop runs 
 | Python | `pip install hebbs` | Stable |
 | TypeScript | `npm install @hebbs/client` | Stable |
 | Rust | `hebbs` crate | Stable |
-| Go | `go get hebbs.io/client` | Beta |
+| Go | `go get hebbs.ai/client` | Beta |
 
 Python supports both server mode (gRPC) and embedded mode (PyO3, no separate process).
 
