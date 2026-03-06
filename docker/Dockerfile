@@ -14,19 +14,23 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: Build ───────────────────────────────────────────────────────────
-FROM rust:1.86-bookworm AS builder
+# Ubuntu 24.04 provides glibc 2.39, required by ort-sys pre-built ONNX Runtime.
+FROM ubuntu:24.04 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates build-essential g++ pkg-config \
+    protobuf-compiler libprotobuf-dev libclang-dev libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain 1.91.0
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /build
 
-# Cache dependency compilation: copy manifests first, build a dummy, then copy
-# real source. This avoids rebuilding all dependencies on every source change.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY proto/ proto/
-
-# Protobuf compiler for tonic-build
-RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler && \
-    rm -rf /var/lib/apt/lists/*
 
 RUN cargo build --release \
     -p hebbs-server \
@@ -40,7 +44,7 @@ RUN cargo build --release \
 RUN ldd target/release/hebbs-server || true
 
 # ── Stage 2: Runtime ─────────────────────────────────────────────────────────
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/cc-debian13:nonroot
 
 LABEL org.opencontainers.image.title="HEBBS" \
       org.opencontainers.image.description="Cognitive memory engine for AI agents" \
