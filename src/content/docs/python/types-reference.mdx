@@ -67,15 +67,45 @@ Enum for the four recall strategies.
 | `CAUSAL` | Follow causal edges (graph adjacency) |
 | `ANALOGICAL` | Cross-domain pattern matching |
 
+## ScoringWeights
+
+Override composite scoring weights for `recall()` and `prime()`. When omitted, the engine uses default weights.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `w_relevance` | `float` | `0.5` | Weight for semantic relevance (cosine similarity) |
+| `w_recency` | `float` | `0.2` | Weight for temporal recency |
+| `w_importance` | `float` | `0.2` | Weight for stored importance value |
+| `w_reinforcement` | `float` | `0.1` | Weight for recall frequency (Hebbian reinforcement) |
+| `max_age_us` | `int \| None` | `None` | Max age for recency decay (microseconds). Server default: 30 days. |
+| `reinforcement_cap` | `int \| None` | `None` | Cap for reinforcement scaling. Server default: 100. |
+
+See [Composite Scoring](/concepts/recall-strategies/#composite-scoring) for the full formula.
+
+## StrategyDetail
+
+Per-strategy metadata for a recall result. Each strategy populates different fields.
+
+| Field | Type | Description |
+|---|---|---|
+| `strategy` | `str` | Strategy name: `"similarity"`, `"temporal"`, `"causal"`, `"analogical"` |
+| `relevance` | `float` | Raw relevance score for this strategy (cosine similarity for similarity strategy) |
+| `distance` | `float \| None` | HNSW distance (similarity only) |
+| `timestamp` | `int \| None` | Memory timestamp (temporal only) |
+| `rank` | `int \| None` | Temporal ordering rank (temporal only) |
+| `depth` | `int \| None` | Graph traversal depth (causal only) |
+| `embedding_similarity` | `float \| None` | Vector similarity component (analogical only) |
+| `structural_similarity` | `float \| None` | Structural similarity component (analogical only) |
+
 ## RecallResult
 
-A single memory returned from a recall query, with a relevance score.
+A single memory returned from a recall query, with composite score and strategy details.
 
 | Field | Type | Description |
 |---|---|---|
 | `memory` | `Memory` | The recalled memory |
-| `score` | `float` | Relevance score (0.0–1.0) |
-| `strategy` | `RecallStrategy` | Strategy that produced this result |
+| `score` | `float` | Composite score (weighted blend of relevance, recency, importance, reinforcement) |
+| `strategy_details` | `list[StrategyDetail]` | Per-strategy metadata including raw relevance |
 
 ## RecallOutput
 
@@ -83,10 +113,8 @@ The complete response from a `recall()` call.
 
 | Field | Type | Description |
 |---|---|---|
-| `memories` | `list[RecallResult]` | Ranked list of recalled memories |
-| `query` | `str` | The original query text |
-| `strategy` | `RecallStrategy` | Strategy used |
-| `latency_ms` | `float` | Server-side query latency |
+| `results` | `list[RecallResult]` | Ranked list of recalled memories (sorted by composite score) |
+| `strategy_errors` | `list[StrategyError]` | Errors from individual strategies, if any |
 
 ## PrimeOutput
 
@@ -94,8 +122,9 @@ Response from a `prime()` call.
 
 | Field | Type | Description |
 |---|---|---|
-| `primed_count` | `int` | Number of memories preloaded |
-| `latency_ms` | `float` | Server-side latency |
+| `results` | `list[RecallResult]` | Blended temporal + similarity results |
+| `temporal_count` | `int` | Number of results from temporal component |
+| `similarity_count` | `int` | Number of results from similarity component |
 
 ## ForgetResult
 

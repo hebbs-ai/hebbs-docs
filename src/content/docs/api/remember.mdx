@@ -33,23 +33,26 @@ Returns the created `Memory` object with `id`, `content`, `importance`, `context
 ### curl (REST)
 
 ```bash
-curl -X POST http://localhost:6381/v1/memories \
+curl -s -X POST http://localhost:6381/v1/memories \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
   -d '{
     "content": "User prefers dark mode and keyboard shortcuts.",
     "importance": 0.8,
     "context": {"source": "settings", "session_id": "sess_abc123"},
     "entity_id": "user_42"
-  }'
+  }' | jq .
 ```
 
 ### grpcurl (gRPC)
 
 ```bash
-grpcurl -plaintext -d '{
-  "content": "User prefers dark mode and keyboard shortcuts.",
-  "importance": 0.8,
-  "context": {"source": "settings"},
-  "entity_id": "user_42"
-}' localhost:6380 hebbs.MemoryService/Remember
+grpcurl -plaintext \
+  -H "authorization: Bearer $HEBBS_API_KEY" \
+  -d '{
+    "content": "User prefers dark mode and keyboard shortcuts.",
+    "importance": 0.8,
+    "context": {"source": "settings"},
+    "entity_id": "user_42"
+  }' localhost:6380 hebbs.MemoryService/Remember
 ```

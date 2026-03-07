@@ -14,13 +14,15 @@ hebbs-cli recall --entity customer-42 --query "contact preferences"
 ```
 
 ```
- # │ Score │ Content                          │ Kind     │ Created
-───┼───────┼──────────────────────────────────┼──────────┼────────────────
- 1 │ 0.943 │ Customer prefers email over phone │ episodic │ 2025-01-15 14:32
- 2 │ 0.871 │ Follows up weekly via newsletter  │ semantic │ 2025-01-14 09:15
+ # │ Score  │ Relevance │ Content                          │ Kind     │ Created
+───┼────────┼───────────┼──────────────────────────────────┼──────────┼────────────────
+ 1 │ 0.7430 │ 0.9430    │ Customer prefers email over phone │ episodic │ 2025-01-15 14:32
+ 2 │ 0.6710 │ 0.8710    │ Follows up weekly via newsletter  │ episodic │ 2025-01-14 09:15
 
 2 memories recalled in 4.2ms
 ```
+
+The `Score` column is the **composite score** (weighted blend of relevance, recency, importance, and reinforcement). The `Relevance` column is the **raw cosine similarity** between the query and the memory embedding. See [Composite Scoring](/concepts/recall-strategies/#composite-scoring) for details.
 
 Human format is the default and is designed for interactive use. It automatically detects terminal width and truncates long content.
 
@@ -33,29 +35,30 @@ hebbs-cli recall --entity customer-42 --query "contact preferences" --format jso
 ```
 
 ```json
-{
-  "memories": [
-    {
-      "id": "mem_abc123",
+[
+  {
+    "memory": {
+      "memory_id": "01KK3S0KXYE22EFF489YRTH559",
       "content": "Customer prefers email over phone",
-      "score": 0.943,
-      "kind": "episodic",
-      "entity": "customer-42",
-      "created_at": "2025-01-15T14:32:00Z"
+      "importance": 0.5,
+      "kind": "episode",
+      "entity_id": "customer-42",
+      "created_at": 1705326720000000
     },
-    {
-      "id": "mem_def456",
-      "content": "Follows up weekly via newsletter",
-      "score": 0.871,
-      "kind": "semantic",
-      "entity": "customer-42",
-      "created_at": "2025-01-14T09:15:00Z"
-    }
-  ],
-  "strategy": "similarity",
-  "latency_ms": 4.2
-}
+    "score": 0.7430,
+    "relevance": 0.9430,
+    "strategy_details": [
+      {
+        "strategy": "similarity",
+        "relevance": 0.9430,
+        "distance": 0.0570
+      }
+    ]
+  }
+]
 ```
+
+The `score` field is the composite score. The `relevance` field is the raw cosine similarity from the primary strategy. The `strategy_details` array contains per-strategy metadata including the raw relevance for each strategy that found the result.
 
 ### Piping to jq
 

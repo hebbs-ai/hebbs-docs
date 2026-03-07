@@ -14,6 +14,15 @@ HEBBS exposes two API surfaces for the same operations:
 
 Both APIs share the same underlying engine and behavior. Choose gRPC for production agents and low latency; choose REST for scripting, debugging, or integration with HTTP-only systems.
 
+## Authentication
+
+All API requests require a Bearer token when auth is enabled (the default). The server prints a bootstrap API key on first start. Pass it as:
+
+- **REST**: `Authorization: Bearer $HEBBS_API_KEY` header
+- **gRPC**: `authorization: Bearer $HEBBS_API_KEY` metadata
+
+See [REST Endpoints — Authentication](/api/rest-endpoints/#authentication) for details.
+
 ## Operations
 
 HEBBS defines exactly 9 operations, grouped into three categories:

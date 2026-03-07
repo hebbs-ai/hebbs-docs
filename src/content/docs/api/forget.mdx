@@ -12,27 +12,55 @@ The `forget` operation removes memories from HEBBS. It supports deletion by enti
 | Protocol | Service/Method | Endpoint |
 |----------|----------------|----------|
 | **gRPC** | `MemoryService.Forget` | — |
-| **REST** | POST | `/v1/memories/forget` |
+| **REST** | POST | `/v1/forget` |
 
 ## Request Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `entity_id` | string | No* | Forget all memories for this entity. *Required if `memory_ids` not provided. |
-| `memory_ids` | array | No* | Forget specific memories by ID. *Required if `entity_id` not provided. |
-| `criteria` | object | No | Additional filters: `before`, `after`, `context_keys`, etc. |
+| `entity_id` | string | No* | Forget all memories for this entity. *At least one filter required. |
+| `memory_ids` | array | No* | Forget specific memories by ID. |
+| `staleness_threshold_us` | int | No | Forget memories older than this (microseconds since epoch). |
+| `memory_kind` | string | No | Filter by kind: `"episode"`, `"insight"`, `"revision"`. |
 
 ## Response
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `forgotten_count` | int | Number of memories directly forgotten. |
-| `cascade_count` | int | Number of related records removed (edges, derived insights). |
-| `tombstone_count` | int | Number of tombstone records written for audit. |
+
+## Examples
+
+### Forget by entity (REST)
+
+```bash
+curl -s -X POST http://localhost:6381/v1/forget \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"entity_id": "user_42"}' | jq .
+```
+
+### Forget by memory IDs (REST)
+
+```bash
+curl -s -X POST http://localhost:6381/v1/forget \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"memory_ids": ["01KK3S0KXYE22EFF489YRTH559"]}' | jq .
+```
+
+### grpcurl (gRPC)
+
+```bash
+grpcurl -plaintext \
+  -H "authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"entity_id": "user_42"}' \
+  localhost:6380 hebbs.MemoryService/Forget
+```
 
 ## GDPR Considerations
 
-- **Right to erasure**: Use `entity_id` to forget all data for a user. The operation is atomic and idempotent for the same request.
+- **Right to erasure**: Use `entity_id` to forget all data for a user.
 - **Partial deletion**: Use `memory_ids` for targeted removal (e.g., a single incorrect memory).
 - **Audit trail**: Tombstones record that a forget occurred; they do not retain content. Retention of tombstones is configurable.
 - **Cascade**: Insights derived from forgotten episodes are either forgotten or marked as orphaned, depending on policy.

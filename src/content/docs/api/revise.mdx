@@ -12,16 +12,18 @@ The `revise` operation updates an existing memory. Instead of overwriting in pla
 | Protocol | Service/Method | Endpoint |
 |----------|----------------|----------|
 | **gRPC** | `MemoryService.Revise` | — |
-| **REST** | PUT | `/v1/memories/{id}` |
+| **REST** | PUT | `/v1/revise/:id` |
 
 ## Request Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `memory_id` | string | Yes | ID of the memory to revise. |
+| `memory_id` | string | Yes | ID of the memory to revise (passed as URL path parameter). |
 | `content` | string | No | New content. Omitted fields retain previous values. |
 | `importance` | float | No | New importance score (0.0–1.0). |
-| `context` | map | No | New or merged context. Behavior is merge-by-key unless replace semantics specified. |
+| `context` | map | No | New or merged context. Behavior depends on `context_mode`. |
+| `context_mode` | string | No | `"merge"` (default) or `"replace"`. Controls how context is updated. |
+| `entity_id` | string | No | Entity scope for the memory. |
 
 ## Predecessor Snapshot Semantics
 
@@ -36,3 +38,29 @@ When you call `revise`, the system:
 ## Response
 
 Returns the updated `Memory` object (the new Revision), with `id`, `content`, `importance`, `context`, `edges` (including `RevisedFrom`), `created_at`, `updated_at`, and `kind: Revision`.
+
+## Examples
+
+### curl (REST)
+
+```bash
+curl -s -X PUT http://localhost:6381/v1/revise/01KK3S0KXYE22EFF489YRTH559 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{
+    "content": "Met with the Acme Corp team about Q2 roadmap. They confirmed budget approval.",
+    "importance": 0.9
+  }' | jq .
+```
+
+### grpcurl (gRPC)
+
+```bash
+grpcurl -plaintext \
+  -H "authorization: Bearer $HEBBS_API_KEY" \
+  -d '{
+    "memory_id": "01KK3S0KXYE22EFF489YRTH559",
+    "content": "Met with the Acme Corp team about Q2 roadmap. They confirmed budget approval.",
+    "importance": 0.9
+  }' localhost:6380 hebbs.MemoryService/Revise
+```

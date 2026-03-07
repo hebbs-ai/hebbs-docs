@@ -15,6 +15,12 @@ HEBBS supports four recall strategies. Each targets a different access pattern. 
 
 **Example use case**: A sales agent receives a new lead. Similarity recall fetches past conversations with similar companies or topics to prime context before the call.
 
+### Defaults and Tuning
+
+| Parameter | Default | When to change |
+|-----------|---------|----------------|
+| `ef_search` | `50` | Increase (up to ~500) for large datasets where you need higher recall accuracy and can tolerate slightly higher latency. Decrease for real-time applications with tight latency budgets. |
+
 ## Temporal
 
 **What it does**: Returns memories in a time range, ordered by recency (or optionally by importance within the range).
@@ -24,6 +30,12 @@ HEBBS supports four recall strategies. Each targets a different access pattern. 
 **How it works internally**: A B-tree index on `(entity_id, created_at)` supports efficient range scans. The query specifies `start_time` and `end_time`. Results are streamed in time order. Time complexity is O(log n + k) where k is the number of memories in the range.
 
 **Example use case**: A support agent needs the last 10 interactions with this customer. Temporal recall fetches the most recent memories in order.
+
+### Defaults and Tuning
+
+| Parameter | Default | When to change |
+|-----------|---------|----------------|
+| `time_range` | `None` (unbounded) | Set explicit start/end timestamps to focus on a specific period (e.g. "last 24 hours", "Q1 2025"). When omitted, all memories are eligible, returned newest-first up to `top_k`. |
 
 ## Causal
 
@@ -35,6 +47,14 @@ HEBBS supports four recall strategies. Each targets a different access pattern. 
 
 **Example use case**: A research assistant traces how a conclusion was reached. Causal recall walks backward from the conclusion to the supporting evidence and reasoning steps.
 
+### Defaults and Tuning
+
+| Parameter | Default | When to change |
+|-----------|---------|----------------|
+| `seed_memory_id` | `None` (auto-detect) | Set explicitly when you know the starting point for the graph walk. When omitted, the engine embeds the cue and uses the closest memory as the seed. |
+| `max_depth` | `5` (bounded at 10) | Increase for deep causal chains. The hard cap of 10 prevents runaway traversals. Decrease for shallow "immediate cause" queries. |
+| `edge_types` | `None` (all types) | Filter to `["CausedBy"]` for pure cause-tracing, or `["FollowedBy"]` for sequential narratives. When omitted, all edge types are followed. |
+
 ## Analogical
 
 **What it does**: Finds memories that share structural patterns across domains. "This situation is like X in a different context."
@@ -44,6 +64,12 @@ HEBBS supports four recall strategies. Each targets a different access pattern. 
 **How it works internally**: Structural pattern matching over memory graphs. Extracts relational structure (entities, actions, outcomes) and finds isomorphic or similar patterns in other memories. More expensive than similarity; typically used with smaller candidate sets or as a secondary pass.
 
 **Example use case**: A product manager asks "Have we seen a similar launch failure before?" Analogical recall finds past launches with comparable failure patterns, even if the domains differ.
+
+### Defaults and Tuning
+
+| Parameter | Default | When to change |
+|-----------|---------|----------------|
+| `analogical_alpha` | `0.5` (balanced) | Lower (toward `0.0`) to favor structural similarity -- useful when you want pattern matches even if the surface content differs. Raise (toward `1.0`) to favor embedding similarity -- useful when content overlap is a stronger signal than structure. |
 
 ## Multi-Strategy Recall
 

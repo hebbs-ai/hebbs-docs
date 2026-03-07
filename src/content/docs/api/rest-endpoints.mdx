@@ -7,23 +7,159 @@ description: Complete HTTP REST API reference with methods, paths, and payloads.
 
 HEBBS exposes a REST API on port 6381. All endpoints use JSON for request and response bodies. Base URL: `http://localhost:6381` (or your deployed host).
 
+## Authentication
+
+All REST endpoints require an `Authorization: Bearer <key>` header when auth is enabled (the default). Use the API key printed by the server on first start:
+
+```bash
+export HEBBS_API_KEY="hb_..."
+
+curl -s http://localhost:6381/v1/health/ready \
+  -H "Authorization: Bearer $HEBBS_API_KEY"
+```
+
+To disable auth for local development, start the server with `HEBBS_AUTH_ENABLED=false`.
+
 ## Endpoint Reference
 
 | Method | Path | Description | Request Body | Response Body |
 |--------|------|-------------|--------------|---------------|
-| POST | `/v1/memories` | Store a new memory | `content`, `importance`, `context`, `entity_id`, `edges` | `Memory` |
-| POST | `/v1/memories/recall` | Retrieve memories by cue and strategies | `cue`, `strategies`, `top_k`, `entity_id`, `scoring_weights` | `RecallResponse` |
-| PUT | `/v1/memories/{id}` | Revise an existing memory | `content`, `importance`, `context` | `Memory` |
-| POST | `/v1/memories/forget` | Delete memories by entity or IDs | `entity_id`, `memory_ids`, `criteria` | `ForgetResponse` |
-| POST | `/v1/memories/prime` | Pre-load session context | `entity_id`, `max_memories`, `similarity_cue` | `PrimeResponse` |
-| POST | `/v1/reflect` | Manually trigger reflection | `entity_id` (optional) | `ReflectResponse` |
-| GET | `/v1/insights` | Query consolidated insights | Query params: `entity_id`, `max_results` | `Insight[]` |
-| GET | `/health` | Liveness probe | — | Health status |
-| GET | `/ready` | Readiness probe | — | Readiness status |
-| GET | `/metrics` | Prometheus metrics | — | Text exposition format |
+| POST | `/v1/memories` | Store a new memory | `content`, `importance`, `context`, `entity_id` | `Memory` |
+| GET | `/v1/memories/:id` | Retrieve a memory by ID | — | `Memory` |
+| POST | `/v1/recall` | Retrieve memories by cue and strategies | `cue`, `strategies`, `top_k`, `entity_id`, `scoring_weights`, `cue_context`, `ef_search`, `time_range`, `seed_memory_id`, `max_depth`, `edge_types`, `analogical_alpha` | `RecallResponse` |
+| POST | `/v1/prime` | Pre-load session context | `entity_id`, `max_memories`, `similarity_cue`, `scoring_weights` | `PrimeResponse` |
+| PUT | `/v1/revise/:id` | Revise an existing memory | `content`, `importance`, `context`, `context_mode`, `entity_id` | `Memory` |
+| POST | `/v1/forget` | Delete memories by criteria | `memory_ids`, `entity_id`, `staleness_threshold_us`, `memory_kind` | `ForgetResponse` |
+| POST | `/v1/subscribe` | Open SSE subscription stream | `entity_id`, `confidence_threshold` | SSE event stream |
+| POST | `/v1/subscribe/:id/feed` | Feed text to a subscription | `text` | `{}` |
+| DELETE | `/v1/subscribe/:id` | Close a subscription | — | `{}` |
+| GET | `/v1/insights` | Query consolidated insights | Query params: `entity_id`, `min_confidence`, `max_results` | `Memory[]` |
+| GET | `/v1/health/live` | Liveness probe | — | `{"status": "alive"}` |
+| GET | `/v1/health/ready` | Readiness probe | — | `{"status": "ready"}` |
+| GET | `/v1/metrics` | Prometheus metrics | — | Text exposition format |
+
+:::note
+**Recall defaults:** Only `cue` and `strategies` are required. All other fields (`top_k`, `ef_search`, `time_range`, `seed_memory_id`, `max_depth`, `edge_types`, `analogical_alpha`, `cue_context`, `scoring_weights`) use smart defaults. See [recall](/api/recall/#request-fields) for the full default table.
+:::
+
+## Examples
+
+### Remember
+
+```bash
+curl -s -X POST http://localhost:6381/v1/memories \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"content": "Met with the Acme Corp team about Q2 roadmap.", "importance": 0.8}' | jq .
+```
+
+### Recall (default composite scoring)
+
+```bash
+curl -s -X POST http://localhost:6381/v1/recall \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"cue": "Acme meeting", "strategies": ["similarity"]}' | jq .
+```
+
+Response includes `score` (composite), `relevance` (raw cosine similarity), and `strategy_details`:
+
+```json
+[
+  {
+    "memory": { "memory_id": "...", "content": "Met with the Acme Corp team about Q2 roadmap.", "importance": 0.8, "kind": "episode", "..." : "..." },
+    "score": 0.6701,
+    "relevance": 0.8502,
+    "strategy_details": [{ "strategy": "similarity", "relevance": 0.8502, "distance": 0.1498 }]
+  }
+]
+```
+
+### Recall (pure relevance scoring)
+
+```bash
+curl -s -X POST http://localhost:6381/v1/recall \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{
+    "cue": "Acme meeting",
+    "strategies": ["similarity"],
+    "scoring_weights": {"w_relevance": 1.0, "w_recency": 0.0, "w_importance": 0.0, "w_reinforcement": 0.0}
+  }' | jq .
+```
+
+With these weights, `score` and `relevance` will be equal. See [Composite Scoring](/concepts/recall-strategies/#composite-scoring) for all weight options.
+
+### Prime
+
+```bash
+curl -s -X POST http://localhost:6381/v1/prime \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"entity_id": "customer-42", "similarity_cue": "account history"}' | jq .
+```
+
+### Get by ID
+
+```bash
+curl -s http://localhost:6381/v1/memories/01KK3S0KXYE22EFF489YRTH559 \
+  -H "Authorization: Bearer $HEBBS_API_KEY" | jq .
+```
+
+### Revise
+
+```bash
+curl -s -X PUT http://localhost:6381/v1/revise/01KK3S0KXYE22EFF489YRTH559 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"content": "Updated meeting notes with budget approval.", "importance": 0.9}' | jq .
+```
+
+### Forget
+
+```bash
+curl -s -X POST http://localhost:6381/v1/forget \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"entity_id": "customer-42"}' | jq .
+```
+
+### Insights
+
+```bash
+curl -s "http://localhost:6381/v1/insights?entity_id=customer-42&max_results=5" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" | jq .
+```
+
+### Subscribe (SSE)
+
+Open a subscription stream:
+
+```bash
+curl -s -N -X POST http://localhost:6381/v1/subscribe \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"entity_id": "customer-42", "confidence_threshold": 0.6}'
+```
+
+Feed text (in a second terminal):
+
+```bash
+curl -s -X POST http://localhost:6381/v1/subscribe/1/feed \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"text": "Customer asked about dark mode preferences."}'
+```
+
+Close the subscription:
+
+```bash
+curl -s -X DELETE http://localhost:6381/v1/subscribe/1 \
+  -H "Authorization: Bearer $HEBBS_API_KEY"
+```
 
 ## Notes
 
-- **subscribe** is gRPC-only (bidirectional streaming); no REST equivalent.
-- **reflect_policy** configuration may use PUT/PATCH to `/v1/reflect/policy` or equivalent; exact path depends on implementation.
+- **subscribe** uses Server-Sent Events (SSE) over REST for real-time pushes. Full bidirectional streaming is available via gRPC.
 - All `/v1/*` endpoints return JSON. Use `Content-Type: application/json` for request bodies.
+- Memory IDs in REST paths are 32-character hex strings (16 bytes).

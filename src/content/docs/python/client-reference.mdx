@@ -55,32 +55,81 @@ Retrieve a single memory by its ID.
 
 ---
 
-#### `recall(query, entity, *, strategy="similarity", top_k=10, threshold=None)`
+#### `recall(cue, *, strategies=None, top_k=None, entity_id=None, scoring_weights=None, cue_context=None, strategy_config=None)`
 
 Query the engine for relevant memories.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `query` | `str` | Natural language query |
-| `entity` | `str` | Entity scope to search within |
-| `strategy` | `str \| RecallStrategy` | One of `similarity`, `temporal`, `causal`, `analogical` |
-| `top_k` | `int` | Maximum number of results |
-| `threshold` | `float \| None` | Minimum relevance score (0.0–1.0) |
+| `cue` | `str` | Natural language query |
+| `strategies` | `list[str] \| None` | One or more of `"similarity"`, `"temporal"`, `"causal"`, `"analogical"`. Default: `["similarity"]`. |
+| `top_k` | `int \| None` | Maximum number of results (default: 10) |
+| `entity_id` | `str \| None` | Entity scope to search within |
+| `scoring_weights` | `ScoringWeights \| dict \| None` | Override composite scoring weights. Pass `ScoringWeights(w_relevance=1.0, w_recency=0.0, w_importance=0.0, w_reinforcement=0.0)` for pure relevance ranking. Default: composite (0.5/0.2/0.2/0.1). |
+| `cue_context` | `str \| None` | Additional context appended to the cue during embedding for disambiguation. Not stored. Default: `None`. |
+| `strategy_config` | `RecallStrategyConfig \| None` | Per-strategy tuning parameters. Optional -- smart defaults are used when omitted. See [RecallStrategyConfig](#recallstrategyconfig) below. |
 
 **Returns:** `RecallOutput`
 
+Each result includes both `score` (composite) and per-strategy `strategy_details` with raw `relevance`. See [Composite Scoring](/concepts/recall-strategies/#composite-scoring).
+
+**Basic usage** -- this is all most callers need:
+
+```python
+results = await client.recall("Acme meeting", strategies=["similarity"])
+```
+
+**Advanced usage** -- per-strategy tuning with `RecallStrategyConfig`:
+
+```python
+from hebbs import RecallStrategyConfig
+
+results = await client.recall(
+    "What led to the pricing pushback?",
+    strategies=["causal"],
+    strategy_config=RecallStrategyConfig(
+        seed_memory_id="01KK3S0KXYE22EFF489YRTH559",
+        max_depth=8,
+        edge_types=["CausedBy"],
+    ),
+)
+```
+
+#### `RecallStrategyConfig`
+
+Optional configuration for per-strategy tuning parameters. All fields default to `None`, which tells the engine to use its built-in defaults.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ef_search` | `int \| None` | `50` | HNSW candidate count for similarity recall. Higher = more accurate, slower. |
+| `time_range` | `TimeRange \| None` | `None` (unbounded) | Temporal bounds. When omitted, temporal recall returns all memories newest-first up to `top_k`. |
+| `seed_memory_id` | `str \| None` | `None` (auto-detect) | Starting node for causal traversal. When omitted, the engine picks the best seed by embedding the cue. |
+| `max_depth` | `int \| None` | `5` (bounded at 10) | Maximum hops for causal graph traversal. |
+| `edge_types` | `list[str] \| None` | `None` (all types) | Restrict causal traversal to specific edge types. |
+| `analogical_alpha` | `float \| None` | `0.5` | Blending weight for analogical recall: `0.0` = pure structural, `1.0` = pure embedding. |
+
+```python
+from hebbs import RecallStrategyConfig, TimeRange
+
+config = RecallStrategyConfig(
+    ef_search=200,
+    analogical_alpha=0.3,
+    time_range=TimeRange(start=1709251200000000, end=1711929600000000),
+)
+```
+
 ---
 
-#### `prime(query, entity, *, strategy="similarity", top_k=10)`
+#### `prime(entity_id, *, max_memories=None, similarity_cue=None, scoring_weights=None)`
 
-Preload relevant memories for low-latency recall.
+Pre-load session context for an entity, blending temporal and similarity recall.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `query` | `str` | Natural language query |
-| `entity` | `str` | Entity scope |
-| `strategy` | `str \| RecallStrategy` | Recall strategy |
-| `top_k` | `int` | Maximum number of memories to prime |
+| `entity_id` | `str` | Entity whose context to load |
+| `max_memories` | `int \| None` | Maximum total memories to return |
+| `similarity_cue` | `str \| None` | Optional cue for similarity component |
+| `scoring_weights` | `ScoringWeights \| dict \| None` | Override composite scoring weights. Default: composite (0.5/0.2/0.2/0.1). |
 
 **Returns:** `PrimeOutput`
 
