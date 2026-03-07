@@ -28,7 +28,9 @@ from hebbs.types import (
     Memory,
     PrimeOutput,
     RecallOutput,
+    RecallStrategyConfig,
     ReflectResult,
+    ScoringWeights,
 )
 
 
@@ -41,10 +43,12 @@ class _AuthMetadataInterceptor(
     def __init__(self, api_key: str) -> None:
         self._metadata = [("authorization", f"Bearer {api_key}")]
 
-    def _inject(self, client_call_details: grpc.aio.ClientCallDetails) -> _CallDetails:
+    def _inject(
+        self, client_call_details: grpc.aio.ClientCallDetails
+    ) -> grpc.aio.ClientCallDetails:
         metadata = list(client_call_details.metadata or [])
         metadata.extend(self._metadata)
-        return _CallDetails(
+        return grpc.aio.ClientCallDetails(
             method=client_call_details.method,
             timeout=client_call_details.timeout,
             metadata=metadata,
@@ -57,17 +61,6 @@ class _AuthMetadataInterceptor(
 
     async def intercept_unary_stream(self, continuation, client_call_details, request):
         return await continuation(self._inject(client_call_details), request)
-
-
-class _CallDetails(grpc.aio.ClientCallDetails):
-    """Concrete ``ClientCallDetails`` with writable attributes."""
-
-    def __init__(self, method, timeout, metadata, credentials, wait_for_ready):
-        self.method = method
-        self.timeout = timeout
-        self.metadata = metadata
-        self.credentials = credentials
-        self.wait_for_ready = wait_for_ready
 
 
 class HebbsClient:
@@ -166,25 +159,43 @@ class HebbsClient:
     async def recall(
         self,
         cue: str,
-        strategies: list[str] | None = None,
+        strategies: list[str | RecallStrategyConfig] | None = None,
         top_k: int | None = None,
         entity_id: str | None = None,
+        scoring_weights: ScoringWeights | dict | None = None,
+        cue_context: dict[str, Any] | None = None,
     ) -> RecallOutput:
-        """Recall memories matching a cue using one or more strategies."""
+        """Recall memories matching a cue using one or more strategies.
+
+        For basic usage, pass strategy names as strings::
+
+            await client.recall("query", strategies=["similarity"])
+
+        For advanced tuning, pass RecallStrategyConfig objects::
+
+            await client.recall("query", strategies=[
+                RecallStrategyConfig("causal", seed_memory_id=mem.id, max_depth=2),
+            ])
+
+        You can mix strings and configs in the same call.
+        """
         self._ensure_connected()
         assert self._memory is not None
-        return await self._memory.recall(cue, strategies, top_k, entity_id)
+        return await self._memory.recall(
+            cue, strategies, top_k, entity_id, scoring_weights, cue_context,
+        )
 
     async def prime(
         self,
         entity_id: str,
         max_memories: int | None = None,
         similarity_cue: str | None = None,
+        scoring_weights: ScoringWeights | dict | None = None,
     ) -> PrimeOutput:
         """Prime a session: load relevant memories for an entity."""
         self._ensure_connected()
         assert self._memory is not None
-        return await self._memory.prime(entity_id, max_memories, similarity_cue)
+        return await self._memory.prime(entity_id, max_memories, similarity_cue, scoring_weights)
 
     async def revise(
         self,

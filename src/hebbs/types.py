@@ -95,6 +95,46 @@ class PrimeOutput:
 
 
 @dataclass
+class RecallStrategyConfig:
+    """Per-strategy configuration for advanced recall tuning.
+
+    Most users should just pass strategy names as strings::
+
+        strategies=["similarity", "temporal"]
+
+    Use this class when you need to tune strategy-specific parameters::
+
+        strategies=[RecallStrategyConfig("causal", seed_memory_id=mem.id, max_depth=3)]
+
+    All fields except ``strategy`` are optional and use smart engine defaults.
+    """
+    strategy: str
+    entity_id: str | None = None
+    top_k: int | None = None
+    ef_search: int | None = None
+    time_range: tuple[int, int] | None = None
+    seed_memory_id: bytes | None = None
+    edge_types: list[EdgeType] | None = None
+    max_depth: int | None = None
+    analogical_alpha: float | None = None
+
+
+@dataclass
+class ScoringWeights:
+    """Composite scoring weight overrides for recall and prime operations.
+
+    When omitted (None), the engine uses default weights:
+    w_relevance=0.5, w_recency=0.2, w_importance=0.2, w_reinforcement=0.1.
+    """
+    w_relevance: float = 0.5
+    w_recency: float = 0.2
+    w_importance: float = 0.2
+    w_reinforcement: float = 0.1
+    max_age_us: int | None = None
+    reinforcement_cap: int | None = None
+
+
+@dataclass
 class ForgetResult:
     forgotten_count: int
     cascade_count: int

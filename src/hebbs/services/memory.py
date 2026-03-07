@@ -18,6 +18,8 @@ from hebbs.types import (
     RecallOutput,
     RecallResult,
     RecallStrategy,
+    RecallStrategyConfig,
+    ScoringWeights,
     StrategyDetail,
     StrategyError,
 )
@@ -49,6 +51,22 @@ _STRATEGY_REVERSE: dict[int, str] = {
     hebbs_pb2.CAUSAL: "causal",
     hebbs_pb2.ANALOGICAL: "analogical",
 }
+
+
+def _to_proto_scoring_weights(sw: ScoringWeights | dict) -> hebbs_pb2.ScoringWeights:
+    if isinstance(sw, dict):
+        sw = ScoringWeights(**{k: v for k, v in sw.items() if v is not None})
+    proto = hebbs_pb2.ScoringWeights(
+        w_relevance=sw.w_relevance,
+        w_recency=sw.w_recency,
+        w_importance=sw.w_importance,
+        w_reinforcement=sw.w_reinforcement,
+    )
+    if sw.max_age_us is not None:
+        proto.max_age_us = sw.max_age_us
+    if sw.reinforcement_cap is not None:
+        proto.reinforcement_cap = sw.reinforcement_cap
+    return proto
 
 
 def _dict_to_struct(d: dict[str, Any] | None) -> struct_pb2.Struct | None:
@@ -102,6 +120,37 @@ def _proto_to_recall_result(r: Any) -> RecallResult:
         score=r.score,
         strategy_details=[_proto_to_strategy_detail(sd) for sd in r.strategy_details],
     )
+
+
+def _build_strategy_config_proto(
+    sc: RecallStrategyConfig,
+    fallback_entity_id: str | None = None,
+) -> hebbs_pb2.RecallStrategyConfig:
+    st = _STRATEGY_MAP.get(sc.strategy, hebbs_pb2.UNSPECIFIED_STRATEGY)
+    cfg = hebbs_pb2.RecallStrategyConfig(strategy_type=st)
+
+    eid = sc.entity_id or fallback_entity_id
+    if eid:
+        cfg.entity_id = eid
+    if sc.top_k is not None:
+        cfg.top_k = sc.top_k
+    if sc.ef_search is not None:
+        cfg.ef_search = sc.ef_search
+    if sc.time_range is not None:
+        cfg.time_range.CopyFrom(
+            hebbs_pb2.TimeRange(start_us=sc.time_range[0], end_us=sc.time_range[1])
+        )
+    if sc.seed_memory_id is not None:
+        cfg.seed_memory_id = sc.seed_memory_id
+    if sc.edge_types:
+        for et in sc.edge_types:
+            proto_et = _EDGE_TYPE_MAP.get(et, hebbs_pb2.EDGE_TYPE_UNSPECIFIED)
+            cfg.edge_types.append(proto_et)
+    if sc.max_depth is not None:
+        cfg.max_depth = sc.max_depth
+    if sc.analogical_alpha is not None:
+        cfg.analogical_alpha = sc.analogical_alpha
+    return cfg
 
 
 class MemoryServiceClient:
@@ -158,16 +207,23 @@ class MemoryServiceClient:
     async def recall(
         self,
         cue: str,
-        strategies: list[str] | None = None,
+        strategies: list[str | RecallStrategyConfig] | None = None,
         top_k: int | None = None,
         entity_id: str | None = None,
+        scoring_weights: ScoringWeights | dict | None = None,
+        cue_context: dict[str, Any] | None = None,
     ) -> RecallOutput:
         strat_configs = []
         for s in (strategies or ["similarity"]):
-            st = _STRATEGY_MAP.get(s, hebbs_pb2.UNSPECIFIED_STRATEGY)
-            cfg = hebbs_pb2.RecallStrategyConfig(strategy_type=st)
-            if entity_id:
-                cfg.entity_id = entity_id
+            if isinstance(s, str):
+                st = _STRATEGY_MAP.get(s, hebbs_pb2.UNSPECIFIED_STRATEGY)
+                cfg = hebbs_pb2.RecallStrategyConfig(strategy_type=st)
+                if entity_id:
+                    cfg.entity_id = entity_id
+            elif isinstance(s, RecallStrategyConfig):
+                cfg = _build_strategy_config_proto(s, entity_id)
+            else:
+                raise TypeError(f"strategies must contain str or RecallStrategyConfig, got {type(s)}")
             strat_configs.append(cfg)
 
         req = hebbs_pb2.RecallRequest(cue=cue, strategies=strat_configs)
@@ -175,6 +231,12 @@ class MemoryServiceClient:
             req.top_k = top_k
         if self._tenant_id:
             req.tenant_id = self._tenant_id
+        if scoring_weights is not None:
+            req.scoring_weights.CopyFrom(_to_proto_scoring_weights(scoring_weights))
+        if cue_context is not None:
+            ctx = _dict_to_struct(cue_context)
+            if ctx is not None:
+                req.cue_context.CopyFrom(ctx)
 
         try:
             resp = await self._stub.Recall(req)
@@ -197,6 +259,7 @@ class MemoryServiceClient:
         entity_id: str,
         max_memories: int | None = None,
         similarity_cue: str | None = None,
+        scoring_weights: ScoringWeights | dict | None = None,
     ) -> PrimeOutput:
         req = hebbs_pb2.PrimeRequest(entity_id=entity_id)
         if max_memories is not None:
@@ -205,6 +268,8 @@ class MemoryServiceClient:
             req.similarity_cue = similarity_cue
         if self._tenant_id:
             req.tenant_id = self._tenant_id
+        if scoring_weights is not None:
+            req.scoring_weights.CopyFrom(_to_proto_scoring_weights(scoring_weights))
 
         try:
             resp = await self._stub.Prime(req)
