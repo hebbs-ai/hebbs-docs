@@ -171,6 +171,55 @@ All four run against a single engine. No fan-out across services.
 
 ---
 
+## Tunable Scoring
+
+Every recall result is ranked by a composite score that blends four signals:
+
+| Signal | What it captures | Default weight |
+|---|---|---|
+| **Relevance** | Semantic similarity to the query | 0.50 |
+| **Recency** | How recently the memory was created | 0.20 |
+| **Importance** | Salience set at encoding time | 0.20 |
+| **Reinforcement** | How often the memory has been recalled | 0.10 |
+
+Pass `scoring_weights` to shift the blend for any recall or prime call:
+
+```python
+# Pure semantic match -- ignore time, importance, and reinforcement
+results = await client.recall(
+    cue="competitor pricing objection",
+    strategies=["similarity"],
+    scoring_weights=ScoringWeights(w_relevance=1.0, w_recency=0.0, w_importance=0.0, w_reinforcement=0.0),
+)
+
+# "What just happened?" -- bias toward recent memories
+results = await client.recall(
+    cue="latest updates",
+    strategies=["similarity"],
+    scoring_weights=ScoringWeights(w_relevance=0.2, w_recency=0.8, w_importance=0.0, w_reinforcement=0.0),
+)
+
+# Surface high-stakes items -- critical information first
+results = await client.recall(
+    cue="deal risks",
+    strategies=["similarity"],
+    scoring_weights=ScoringWeights(w_relevance=0.3, w_recency=0.0, w_importance=0.7, w_reinforcement=0.0),
+)
+
+# Frequently accessed patterns -- what keeps coming up
+results = await client.recall(
+    cue="common objections",
+    strategies=["similarity"],
+    scoring_weights=ScoringWeights(w_relevance=0.3, w_recency=0.0, w_importance=0.0, w_reinforcement=0.7),
+)
+```
+
+Omit `scoring_weights` for the default composite blend. Works across Python, CLI (`--weights 1:0:0:0`), and REST API.
+
+Full documentation: [docs.hebbs.ai/concepts/recall-strategies](https://docs.hebbs.ai/concepts/recall-strategies/)
+
+---
+
 ## Performance
 
 Benchmarked on a single `c6g.large` instance (2 vCPU, 4GB RAM) with 10M stored memories.
