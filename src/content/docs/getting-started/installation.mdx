@@ -66,6 +66,41 @@ docker run -p 6380:6380 -p 6381:6381 \
   ghcr.io/hebbs-ai/hebbs:latest
 ```
 
+## Systemd (Bare Metal / VM)
+
+On Linux servers, install HEBBS as a systemd service for automatic startup, restart-on-failure, and log management via journald:
+
+```bash
+curl -sSf https://hebbs.ai/install | sudo sh -s -- --with-systemd
+```
+
+This creates:
+
+| Path | Purpose |
+|------|---------|
+| `/usr/local/bin/hebbs-server` | Server binary |
+| `/etc/hebbs/hebbs.toml` | Configuration file |
+| `/etc/hebbs/hebbs.env` | Environment overrides and API keys (mode 600) |
+| `/var/lib/hebbs` | Data directory (owned by `hebbs` user) |
+| `/etc/systemd/system/hebbs-server.service` | Systemd unit |
+
+Enable and start the service:
+
+```bash
+sudo systemctl enable --now hebbs-server
+```
+
+Common commands:
+
+```bash
+sudo systemctl status hebbs-server    # check status
+sudo systemctl stop hebbs-server      # graceful shutdown (SIGTERM)
+sudo systemctl restart hebbs-server   # restart after config change
+journalctl -u hebbs-server -f         # stream logs
+```
+
+Edit `/etc/hebbs/hebbs.toml` for server configuration and `/etc/hebbs/hebbs.env` for API keys and environment overrides.
+
 ## Build from Source
 
 Prerequisites: Rust 1.75+, protoc (Protocol Buffers compiler).

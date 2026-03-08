@@ -75,6 +75,7 @@ max_request_size_bytes = 1048576
 export HEBBS_SERVER_GRPC_PORT=7000
 export HEBBS_SERVER_HTTP_PORT=7001
 export HEBBS_SERVER_BIND_ADDRESS=127.0.0.1
+export HEBBS_SERVER_SHUTDOWN_TIMEOUT_SECS=30
 hebbs-server
 ```
 
@@ -529,6 +530,7 @@ Every `HEBBS_*` environment variable and its corresponding TOML key:
 | `HEBBS_SERVER_GRPC_PORT` | `server.grpc_port` | u16 |
 | `HEBBS_SERVER_HTTP_PORT` | `server.http_port` | u16 |
 | `HEBBS_SERVER_BIND_ADDRESS` | `server.bind_address` | string |
+| `HEBBS_SERVER_SHUTDOWN_TIMEOUT_SECS` | `server.shutdown_timeout_secs` | int |
 | `HEBBS_STORAGE_DATA_DIR` | `storage.data_dir` | string |
 | `HEBBS_EMBEDDING_PROVIDER` | `embedding.provider` | string |
 | `HEBBS_EMBEDDING_MODEL_PATH` | `embedding.model_path` | string |
