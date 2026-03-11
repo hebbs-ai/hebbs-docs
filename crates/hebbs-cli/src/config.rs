@@ -10,6 +10,7 @@ pub struct CliConfig {
     pub color: ColorMode,
     pub history_file: PathBuf,
     pub max_history: usize,
+    pub tenant: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -39,6 +40,7 @@ impl Default for CliConfig {
             color: ColorMode::Auto,
             history_file,
             max_history: 1000,
+            tenant: None,
         }
     }
 }
@@ -68,6 +70,9 @@ impl CliConfig {
             }
             if let Some(mh) = file_cfg.max_history {
                 cfg.max_history = mh;
+            }
+            if let Some(t) = file_cfg.tenant {
+                cfg.tenant = Some(t);
             }
         }
 
@@ -112,6 +117,7 @@ struct FileConfig {
     color: Option<ColorMode>,
     history_file: Option<PathBuf>,
     max_history: Option<usize>,
+    tenant: Option<String>,
 }
 
 fn load_config_file() -> Option<FileConfig> {

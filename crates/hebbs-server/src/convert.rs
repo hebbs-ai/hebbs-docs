@@ -4,7 +4,7 @@ use hebbs_core::engine::{RememberEdge, RememberInput};
 use hebbs_core::forget::ForgetCriteria;
 use hebbs_core::memory::{Memory, MemoryKind};
 use hebbs_core::recall::{PrimeInput, RecallInput, RecallStrategy, ScoringWeights, StrategyDetail};
-use hebbs_core::reflect::{InsightsFilter, ReflectScope};
+use hebbs_core::reflect::{ClusterMemorySummary, InsightsFilter, PreparedCluster, ReflectScope};
 use hebbs_core::revise::{ContextMode, ReviseInput};
 use hebbs_index::EdgeType;
 
@@ -15,6 +15,11 @@ use hebbs_proto::generated as pb;
 // ═══════════════════════════════════════════════════════════════════════
 
 pub fn memory_to_proto(m: &Memory) -> pb::Memory {
+    memory_to_proto_with_lineage(m, &[])
+}
+
+/// Convert a Memory to proto, attaching source_memory_ids for Insight-kind memories.
+pub fn memory_to_proto_with_lineage(m: &Memory, source_ids: &[[u8; 16]]) -> pb::Memory {
     let context = context_bytes_to_struct(&m.context_bytes);
 
     pb::Memory {
@@ -32,7 +37,62 @@ pub fn memory_to_proto(m: &Memory) -> pb::Memory {
         kind: memory_kind_to_proto(m.kind) as i32,
         device_id: m.device_id.clone(),
         logical_clock: m.logical_clock,
+        source_memory_ids: source_ids.iter().map(|id| id.to_vec()).collect(),
     }
+}
+
+/// Resolve InsightFrom edges for a batch of memories.
+/// Returns a map from memory_id → Vec<source_id> for Insight-kind memories only.
+/// O(n) edge lookups where n = number of insights in the batch.
+pub fn resolve_lineage_batch(
+    engine: &hebbs_core::engine::Engine,
+    tenant: &hebbs_core::tenant::TenantContext,
+    memories: &[Memory],
+) -> HashMap<[u8; 16], Vec<[u8; 16]>> {
+    resolve_lineage_batch_refs(engine, tenant, &memories.iter().collect::<Vec<_>>())
+}
+
+/// Same as [`resolve_lineage_batch`] but accepts a slice of references.
+pub fn resolve_lineage_batch_refs(
+    engine: &hebbs_core::engine::Engine,
+    tenant: &hebbs_core::tenant::TenantContext,
+    memories: &[&Memory],
+) -> HashMap<[u8; 16], Vec<[u8; 16]>> {
+    let mut lineage = HashMap::new();
+    for m in memories {
+        if m.kind != MemoryKind::Insight {
+            continue;
+        }
+        if m.memory_id.len() != 16 {
+            continue;
+        }
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&m.memory_id);
+        let source_ids = engine
+            .outgoing_edges_for_tenant(tenant, &id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(et, _, _)| *et == EdgeType::InsightFrom)
+            .map(|(_, target, _)| target)
+            .collect::<Vec<_>>();
+        if !source_ids.is_empty() {
+            lineage.insert(id, source_ids);
+        }
+    }
+    lineage
+}
+
+/// Look up lineage source IDs from a pre-built lineage map for a given memory.
+pub fn get_lineage_for_memory(
+    lineage: &HashMap<[u8; 16], Vec<[u8; 16]>>,
+    memory_id: &[u8],
+) -> Vec<[u8; 16]> {
+    if memory_id.len() != 16 {
+        return Vec::new();
+    }
+    let mut id = [0u8; 16];
+    id.copy_from_slice(memory_id);
+    lineage.get(&id).cloned().unwrap_or_default()
 }
 
 fn memory_kind_to_proto(k: MemoryKind) -> pb::MemoryKind {
@@ -282,8 +342,16 @@ fn proto_to_scoring_weights(w: &pb::ScoringWeights) -> ScoringWeights {
 }
 
 pub fn recall_result_to_proto(r: &hebbs_core::recall::RecallResult) -> pb::RecallResult {
+    recall_result_to_proto_with_lineage(r, &HashMap::new())
+}
+
+pub fn recall_result_to_proto_with_lineage(
+    r: &hebbs_core::recall::RecallResult,
+    lineage: &HashMap<[u8; 16], Vec<[u8; 16]>>,
+) -> pb::RecallResult {
+    let sources = get_lineage_for_memory(lineage, &r.memory.memory_id);
     pb::RecallResult {
-        memory: Some(memory_to_proto(&r.memory)),
+        memory: Some(memory_to_proto_with_lineage(&r.memory, &sources)),
         score: r.score,
         strategy_details: r
             .strategy_details
@@ -445,6 +513,78 @@ pub fn proto_to_insights_filter(req: &pb::GetInsightsRequest) -> InsightsFilter 
     }
 }
 
+pub fn proto_to_reflect_prepare_scope(
+    req: &pb::ReflectPrepareRequest,
+) -> Result<ReflectScope, String> {
+    let scope_msg = req
+        .scope
+        .as_ref()
+        .ok_or_else(|| "scope is required".to_string())?;
+
+    match &scope_msg.scope {
+        Some(pb::reflect_scope::Scope::Entity(e)) => Ok(ReflectScope::Entity {
+            entity_id: e.entity_id.clone(),
+            since_us: e.since_us,
+        }),
+        Some(pb::reflect_scope::Scope::Global(g)) => Ok(ReflectScope::Global {
+            since_us: g.since_us,
+        }),
+        None => Err("scope variant is required".to_string()),
+    }
+}
+
+pub fn prepared_cluster_to_proto(c: &PreparedCluster) -> pb::ClusterPrompt {
+    pb::ClusterPrompt {
+        cluster_id: c.cluster_id,
+        member_count: c.member_count,
+        proposal_system_prompt: c.proposal_system_prompt.clone(),
+        proposal_user_prompt: c.proposal_user_prompt.clone(),
+        memory_ids: c.memory_ids.iter().map(hex::encode).collect(),
+        validation_context: c.validation_context.clone(),
+        memories: c.memories.iter().map(memory_summary_to_proto).collect(),
+    }
+}
+
+pub fn memory_summary_to_proto(m: &ClusterMemorySummary) -> pb::ClusterMemorySummary {
+    pb::ClusterMemorySummary {
+        memory_id: hex::encode(m.memory_id),
+        content: m.content.clone(),
+        importance: m.importance,
+        entity_id: m.entity_id.clone(),
+        created_at: m.created_at,
+    }
+}
+
+pub fn proto_to_produced_insight(
+    p: &pb::ProducedInsightInput,
+) -> Result<hebbs_reflect::ProducedInsight, String> {
+    let source_memory_ids: Result<Vec<[u8; 16]>, String> = p
+        .source_memory_ids
+        .iter()
+        .map(|hex_id| {
+            let bytes = hex::decode(hex_id)
+                .map_err(|e| format!("invalid hex memory ID '{hex_id}': {e}"))?;
+            if bytes.len() != 16 {
+                return Err(format!(
+                    "memory ID '{hex_id}' has {} bytes, expected 16",
+                    bytes.len()
+                ));
+            }
+            let mut arr = [0u8; 16];
+            arr.copy_from_slice(&bytes);
+            Ok(arr)
+        })
+        .collect();
+
+    Ok(hebbs_reflect::ProducedInsight {
+        content: p.content.clone(),
+        confidence: p.confidence,
+        source_memory_ids: source_memory_ids?,
+        tags: p.tags.clone(),
+        cluster_id: p.cluster_id.unwrap_or(0) as usize,
+    })
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  Error mapping
 // ═══════════════════════════════════════════════════════════════════════
@@ -552,5 +692,77 @@ mod tests {
         };
         let status = hebbs_error_to_status(err);
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn memory_to_proto_with_lineage_populates_source_ids() {
+        let m = Memory {
+            memory_id: vec![1u8; 16],
+            content: "test insight".into(),
+            importance: 0.8,
+            context_bytes: vec![],
+            entity_id: Some("ent".into()),
+            embedding: None,
+            created_at: 100,
+            updated_at: 100,
+            last_accessed_at: 100,
+            access_count: 1,
+            decay_score: 1.0,
+            kind: MemoryKind::Insight,
+            device_id: None,
+            logical_clock: 1,
+            associative_embedding: None,
+        };
+        let source_a = [2u8; 16];
+        let source_b = [3u8; 16];
+        let proto = memory_to_proto_with_lineage(&m, &[source_a, source_b]);
+        assert_eq!(proto.source_memory_ids.len(), 2);
+        assert_eq!(proto.source_memory_ids[0], source_a.to_vec());
+        assert_eq!(proto.source_memory_ids[1], source_b.to_vec());
+    }
+
+    #[test]
+    fn memory_to_proto_without_lineage_has_empty_sources() {
+        let m = Memory {
+            memory_id: vec![1u8; 16],
+            content: "test episode".into(),
+            importance: 0.5,
+            context_bytes: vec![],
+            entity_id: None,
+            embedding: None,
+            created_at: 100,
+            updated_at: 100,
+            last_accessed_at: 100,
+            access_count: 1,
+            decay_score: 1.0,
+            kind: MemoryKind::Episode,
+            device_id: None,
+            logical_clock: 1,
+            associative_embedding: None,
+        };
+        let proto = memory_to_proto(&m);
+        assert!(proto.source_memory_ids.is_empty());
+    }
+
+    #[test]
+    fn get_lineage_for_memory_returns_correct_sources() {
+        let id_a = [1u8; 16];
+        let source_1 = [10u8; 16];
+        let source_2 = [11u8; 16];
+        let mut lineage = HashMap::new();
+        lineage.insert(id_a, vec![source_1, source_2]);
+
+        let result = get_lineage_for_memory(&lineage, &id_a);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], source_1);
+
+        // Non-existent ID returns empty
+        let id_b = [2u8; 16];
+        let result = get_lineage_for_memory(&lineage, &id_b);
+        assert!(result.is_empty());
+
+        // Invalid-length ID returns empty
+        let result = get_lineage_for_memory(&lineage, &[0u8; 8]);
+        assert!(result.is_empty());
     }
 }

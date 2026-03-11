@@ -19,16 +19,16 @@ use hebbs_core::recall::{
     PrimeInput, RecallInput, RecallStrategy, ScoringWeights, StrategyDetail, DEFAULT_MAX_AGE_US,
     DEFAULT_REINFORCEMENT_CAP,
 };
-use hebbs_core::reflect::InsightsFilter;
+use hebbs_core::reflect::{InsightsFilter, ReflectConfig};
 use hebbs_core::revise::{ContextMode, ReviseInput};
 use hebbs_core::subscribe::SubscribeConfig;
-use hebbs_core::tenant::TenantContext;
 use hebbs_index::EdgeType;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::convert;
 use crate::metrics::HebbsMetrics;
+use crate::middleware::TenantExtractor;
 
 pub(crate) struct SseSubscriptionEntry {
     handle: hebbs_core::subscribe::SubscriptionHandle,
@@ -43,6 +43,7 @@ pub struct AppState {
     pub start_time: std::time::Instant,
     pub version: String,
     pub(crate) sse_subscriptions: SubscriptionMap,
+    pub reflect_config: Option<ReflectConfig>,
 }
 
 impl AppState {
@@ -58,6 +59,7 @@ impl AppState {
             start_time,
             version,
             sse_subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            reflect_config: None,
         }
     }
 }
@@ -74,6 +76,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/v1/subscribe/:id/feed", post(sse_feed_handler))
         .route("/v1/subscribe/:id", delete(sse_close_handler))
         .route("/v1/insights", get(insights_handler))
+        .route("/v1/reflect/prepare", post(reflect_prepare_handler))
+        .route("/v1/reflect/commit", post(reflect_commit_handler))
         .route("/v1/health/live", get(liveness_handler))
         .route("/v1/health/ready", get(readiness_handler))
         .route("/v1/metrics", get(metrics_handler))
@@ -174,6 +178,8 @@ struct MemoryJson {
     decay_score: f32,
     kind: String,
     logical_clock: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    source_memory_ids: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -285,6 +291,13 @@ struct HealthJson {
 }
 
 fn memory_to_json(m: &hebbs_core::memory::Memory) -> MemoryJson {
+    memory_to_json_with_lineage(m, &[])
+}
+
+fn memory_to_json_with_lineage(
+    m: &hebbs_core::memory::Memory,
+    source_ids: &[[u8; 16]],
+) -> MemoryJson {
     let ctx: serde_json::Value = if m.context_bytes.is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
@@ -309,6 +322,7 @@ fn memory_to_json(m: &hebbs_core::memory::Memory) -> MemoryJson {
             MemoryKind::Revision => "revision".to_string(),
         },
         logical_clock: m.logical_clock,
+        source_memory_ids: source_ids.iter().map(hex::encode).collect(),
     }
 }
 
@@ -345,14 +359,18 @@ fn scoring_weights_from_body(sw: ScoringWeightsBody) -> ScoringWeights {
     }
 }
 
-fn recall_result_to_rest_json(r: &hebbs_core::recall::RecallResult) -> RecallResultJson {
+fn recall_result_to_rest_json_with_lineage(
+    r: &hebbs_core::recall::RecallResult,
+    lineage: &std::collections::HashMap<[u8; 16], Vec<[u8; 16]>>,
+) -> RecallResultJson {
     let primary_relevance = r
         .strategy_details
         .first()
         .map(|d| d.relevance())
         .unwrap_or(0.0);
+    let sources = convert::get_lineage_for_memory(lineage, &r.memory.memory_id);
     RecallResultJson {
-        memory: memory_to_json(&r.memory),
+        memory: memory_to_json_with_lineage(&r.memory, &sources),
         score: r.score,
         relevance: primary_relevance,
         strategy_details: r
@@ -408,6 +426,7 @@ fn json_value_to_hashmap(val: serde_json::Value) -> Option<HashMap<String, serde
 
 async fn remember_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     Json(body): Json<RememberBody>,
 ) -> impl IntoResponse {
     let start = std::time::Instant::now();
@@ -425,7 +444,8 @@ async fn remember_handler(
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.remember(input)).await;
+    let result =
+        tokio::task::spawn_blocking(move || engine.remember_for_tenant(&tenant, input)).await;
 
     match result {
         Ok(Ok(memory)) => {
@@ -457,7 +477,11 @@ async fn remember_handler(
     }
 }
 
-async fn get_handler(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn get_handler(
+    State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let memory_id = match hex::decode(&id) {
         Ok(v) if v.len() == 16 => v,
         _ => {
@@ -471,7 +495,8 @@ async fn get_handler(State(state): State<AppState>, Path(id): Path<String>) -> i
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.get(&memory_id)).await;
+    let result =
+        tokio::task::spawn_blocking(move || engine.get_for_tenant(&tenant, &memory_id)).await;
 
     match result {
         Ok(Ok(memory)) => (
@@ -496,6 +521,7 @@ async fn get_handler(State(state): State<AppState>, Path(id): Path<String>) -> i
 
 async fn recall_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     Json(body): Json<RecallBody>,
 ) -> impl IntoResponse {
     let start = std::time::Instant::now();
@@ -542,17 +568,25 @@ async fn recall_handler(
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.recall(input)).await;
+    let tenant_clone = tenant.clone();
+    let result =
+        tokio::task::spawn_blocking(move || engine.recall_for_tenant(&tenant, input)).await;
 
     match result {
         Ok(Ok(output)) => {
             let elapsed = start.elapsed().as_secs_f64();
             state.metrics.observe_operation("recall", "ok", elapsed);
 
+            let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
+            let lineage = convert::resolve_lineage_batch_refs(
+                &state.engine,
+                &tenant_clone,
+                &memories_ref,
+            );
             let results: Vec<RecallResultJson> = output
                 .results
                 .iter()
-                .map(recall_result_to_rest_json)
+                .map(|r| recall_result_to_rest_json_with_lineage(r, &lineage))
                 .collect();
             (
                 StatusCode::OK,
@@ -579,6 +613,7 @@ async fn recall_handler(
 
 async fn prime_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     Json(body): Json<PrimeBody>,
 ) -> impl IntoResponse {
     let start = std::time::Instant::now();
@@ -597,17 +632,25 @@ async fn prime_handler(
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.prime(input)).await;
+    let tenant_clone = tenant.clone();
+    let result =
+        tokio::task::spawn_blocking(move || engine.prime_for_tenant(&tenant, input)).await;
 
     match result {
         Ok(Ok(output)) => {
             let elapsed = start.elapsed().as_secs_f64();
             state.metrics.observe_operation("prime", "ok", elapsed);
 
+            let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
+            let lineage = convert::resolve_lineage_batch_refs(
+                &state.engine,
+                &tenant_clone,
+                &memories_ref,
+            );
             let results: Vec<RecallResultJson> = output
                 .results
                 .iter()
-                .map(recall_result_to_rest_json)
+                .map(|r| recall_result_to_rest_json_with_lineage(r, &lineage))
                 .collect();
             (
                 StatusCode::OK,
@@ -632,6 +675,7 @@ async fn prime_handler(
 
 async fn revise_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     Path(id): Path<String>,
     Json(body): Json<ReviseBody>,
 ) -> impl IntoResponse {
@@ -669,7 +713,8 @@ async fn revise_handler(
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.revise(input)).await;
+    let result =
+        tokio::task::spawn_blocking(move || engine.revise_for_tenant(&tenant, input)).await;
 
     match result {
         Ok(Ok(memory)) => {
@@ -700,6 +745,7 @@ async fn revise_handler(
 
 async fn forget_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     Json(body): Json<ForgetBody>,
 ) -> impl IntoResponse {
     let start = std::time::Instant::now();
@@ -728,7 +774,8 @@ async fn forget_handler(
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.forget(criteria)).await;
+    let result =
+        tokio::task::spawn_blocking(move || engine.forget_for_tenant(&tenant, criteria)).await;
 
     match result {
         Ok(Ok(output)) => {
@@ -762,6 +809,7 @@ async fn forget_handler(
 
 async fn insights_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     axum::extract::Query(query): axum::extract::Query<InsightsQuery>,
 ) -> impl IntoResponse {
     let filter = InsightsFilter {
@@ -771,12 +819,237 @@ async fn insights_handler(
     };
 
     let engine = state.engine.clone();
-    let result = tokio::task::spawn_blocking(move || engine.insights(filter)).await;
+    let tenant_clone = tenant.clone();
+    let result =
+        tokio::task::spawn_blocking(move || engine.insights_for_tenant(&tenant, filter)).await;
 
     match result {
         Ok(Ok(insights)) => {
-            let json: Vec<MemoryJson> = insights.iter().map(memory_to_json).collect();
+            let lineage = convert::resolve_lineage_batch(
+                &state.engine,
+                &tenant_clone,
+                &insights,
+            );
+            let json: Vec<MemoryJson> = insights
+                .iter()
+                .map(|m| {
+                    let mut id = [0u8; 16];
+                    if m.memory_id.len() == 16 {
+                        id.copy_from_slice(&m.memory_id);
+                    }
+                    let sources = lineage.get(&id).map(|v| v.as_slice()).unwrap_or(&[]);
+                    memory_to_json_with_lineage(m, sources)
+                })
+                .collect();
             (StatusCode::OK, Json(serde_json::to_value(&json).unwrap())).into_response()
+        }
+        Ok(Err(e)) => {
+            let (status, json) = map_hebbs_error(e);
+            (status, json).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorJson {
+                error_code: "internal_error".to_string(),
+                message: format!("task join error: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Reflect Prepare / Commit (agent-driven two-step)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct ReflectPrepareBody {
+    entity_id: Option<String>,
+    since_us: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct ClusterMemoryJson {
+    memory_id: String,
+    content: String,
+    importance: f32,
+    entity_id: Option<String>,
+    created_at: u64,
+}
+
+#[derive(Serialize)]
+struct ClusterPromptJson {
+    cluster_id: u32,
+    member_count: u32,
+    proposal_system_prompt: String,
+    proposal_user_prompt: String,
+    memory_ids: Vec<String>,
+    validation_context: serde_json::Value,
+    memories: Vec<ClusterMemoryJson>,
+}
+
+#[derive(Serialize)]
+struct ReflectPrepareJson {
+    session_id: String,
+    memories_processed: usize,
+    clusters: Vec<ClusterPromptJson>,
+    existing_insight_count: usize,
+}
+
+#[derive(Deserialize)]
+struct InsightInputBody {
+    content: String,
+    confidence: f32,
+    source_memory_ids: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    cluster_id: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct ReflectCommitBody {
+    session_id: String,
+    insights: Vec<InsightInputBody>,
+}
+
+#[derive(Serialize)]
+struct ReflectCommitJson {
+    insights_created: usize,
+}
+
+async fn reflect_prepare_handler(
+    State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
+    Json(body): Json<ReflectPrepareBody>,
+) -> impl IntoResponse {
+    let config = match &state.reflect_config {
+        Some(c) => c.clone(),
+        None => ReflectConfig::default().validated(),
+    };
+
+    let scope = if let Some(eid) = body.entity_id {
+        hebbs_core::reflect::ReflectScope::Entity {
+            entity_id: eid,
+            since_us: body.since_us,
+        }
+    } else {
+        hebbs_core::reflect::ReflectScope::Global {
+            since_us: body.since_us,
+        }
+    };
+
+    let engine = state.engine.clone();
+    let result =
+        tokio::task::spawn_blocking(move || engine.reflect_prepare_for_tenant(&tenant, scope, &config))
+            .await;
+
+    match result {
+        Ok(Ok(output)) => {
+            let clusters: Vec<ClusterPromptJson> = output
+                .clusters
+                .iter()
+                .map(|c| ClusterPromptJson {
+                    cluster_id: c.cluster_id,
+                    member_count: c.member_count,
+                    proposal_system_prompt: c.proposal_system_prompt.clone(),
+                    proposal_user_prompt: c.proposal_user_prompt.clone(),
+                    memory_ids: c.memory_ids.iter().map(hex::encode).collect(),
+                    validation_context: serde_json::from_str(&c.validation_context)
+                        .unwrap_or(serde_json::Value::Null),
+                    memories: c.memories.iter().map(|m| ClusterMemoryJson {
+                        memory_id: hex::encode(m.memory_id),
+                        content: m.content.clone(),
+                        importance: m.importance,
+                        entity_id: m.entity_id.clone(),
+                        created_at: m.created_at,
+                    }).collect(),
+                })
+                .collect();
+
+            let resp = ReflectPrepareJson {
+                session_id: output.session_id,
+                memories_processed: output.memories_processed,
+                clusters,
+                existing_insight_count: output.existing_insight_count,
+            };
+            (StatusCode::OK, Json(serde_json::to_value(&resp).unwrap())).into_response()
+        }
+        Ok(Err(e)) => {
+            let (status, json) = map_hebbs_error(e);
+            (status, json).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorJson {
+                error_code: "internal_error".to_string(),
+                message: format!("task join error: {}", e),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn reflect_commit_handler(
+    State(state): State<AppState>,
+    TenantExtractor(_tenant): TenantExtractor,
+    Json(body): Json<ReflectCommitBody>,
+) -> impl IntoResponse {
+    let insights: Result<Vec<hebbs_reflect::ProducedInsight>, String> = body
+        .insights
+        .iter()
+        .map(|i| {
+            let source_ids: Result<Vec<[u8; 16]>, String> = i
+                .source_memory_ids
+                .iter()
+                .map(|hex_id| {
+                    let bytes = hex::decode(hex_id)
+                        .map_err(|e| format!("invalid hex memory ID '{hex_id}': {e}"))?;
+                    if bytes.len() != 16 {
+                        return Err(format!(
+                            "memory ID '{hex_id}' has {} bytes, expected 16",
+                            bytes.len()
+                        ));
+                    }
+                    let mut arr = [0u8; 16];
+                    arr.copy_from_slice(&bytes);
+                    Ok(arr)
+                })
+                .collect();
+
+            Ok(hebbs_reflect::ProducedInsight {
+                content: i.content.clone(),
+                confidence: i.confidence,
+                source_memory_ids: source_ids?,
+                tags: i.tags.clone(),
+                cluster_id: i.cluster_id.unwrap_or(0) as usize,
+            })
+        })
+        .collect();
+
+    let insights = match insights {
+        Ok(v) => v,
+        Err(msg) => {
+            return json_error(StatusCode::BAD_REQUEST, "invalid_input", &msg).into_response()
+        }
+    };
+
+    let engine = state.engine.clone();
+    let session_id = body.session_id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        engine.reflect_commit_for_tenant(
+            &hebbs_core::tenant::TenantContext::default(),
+            &session_id,
+            insights,
+        )
+    })
+    .await;
+
+    match result {
+        Ok(Ok(output)) => {
+            let resp = ReflectCommitJson {
+                insights_created: output.insights_created,
+            };
+            (StatusCode::OK, Json(serde_json::to_value(&resp).unwrap())).into_response()
         }
         Ok(Err(e)) => {
             let (status, json) = map_hebbs_error(e);
@@ -821,24 +1094,30 @@ fn parse_memory_kind(s: &str) -> Option<MemoryKind> {
 
 async fn sse_subscribe_handler(
     State(state): State<AppState>,
+    TenantExtractor(tenant): TenantExtractor,
     Json(body): Json<SubscribeBody>,
 ) -> impl IntoResponse {
-    let kinds: Vec<MemoryKind> = body
+    let explicit_kinds: Vec<MemoryKind> = body
         .kind_filter
         .unwrap_or_default()
         .iter()
         .filter_map(|s| parse_memory_kind(s))
         .collect();
 
+    let defaults = SubscribeConfig::default();
+
     let config = SubscribeConfig {
         entity_id: body.entity_id,
-        memory_kinds: kinds,
+        memory_kinds: if explicit_kinds.is_empty() {
+            defaults.memory_kinds
+        } else {
+            explicit_kinds
+        },
         confidence_threshold: body.confidence_threshold.unwrap_or(0.5),
         time_scope_us: body.time_scope_us,
-        ..SubscribeConfig::default()
+        ..defaults
     };
 
-    let tenant = TenantContext::default();
     let engine = state.engine.clone();
     let handle =
         match tokio::task::spawn_blocking(move || engine.subscribe_for_tenant(&tenant, config))

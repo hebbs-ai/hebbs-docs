@@ -1362,6 +1362,60 @@ fn forget_by_entity_rocksdb() {
     }
 }
 
+/// Regression: forget-by-entity must work after compaction flushes the Temporal CF
+/// to SST files. Previously, a noop prefix extractor on the Temporal CF caused
+/// range_iterator to return 0 results after compaction because each key was its
+/// own prefix and the bloom filter rejected seek targets that weren't exact keys.
+#[test]
+fn forget_by_entity_after_compaction_rocksdb() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw_backend = Arc::new(RocksDbBackend::open(dir.path()).unwrap());
+    let engine = Engine::new(
+        Arc::clone(&raw_backend) as Arc<dyn StorageBackend>,
+        Arc::new(MockEmbedder::default_dims()),
+    )
+    .unwrap();
+
+    for i in 0..6 {
+        engine
+            .remember(RememberInput {
+                content: format!("user pref memory {}", i),
+                importance: Some(0.5),
+                context: None,
+                entity_id: Some("user_prefs".to_string()),
+                edges: vec![],
+            })
+            .unwrap();
+    }
+
+    let extra = engine
+        .remember(RememberInput {
+            content: "meeting note to delete first".to_string(),
+            importance: Some(0.5),
+            context: None,
+            entity_id: Some("meetings".to_string()),
+            edges: vec![],
+        })
+        .unwrap();
+
+    // Delete one memory by ID, which triggers compaction on all CFs
+    // (including Temporal), flushing memtable data to SST files.
+    let output = engine.forget(ForgetCriteria::by_ids(vec![extra.memory_id])).unwrap();
+    assert_eq!(output.forgotten_count, 1);
+
+    // Force an additional compaction to guarantee SST flush.
+    raw_backend.compact(ColumnFamilyName::Temporal).unwrap();
+
+    // This is the operation that previously returned forgotten_count: 0.
+    let output = engine.forget(ForgetCriteria::by_entity("user_prefs")).unwrap();
+    assert_eq!(
+        output.forgotten_count, 6,
+        "forget-by-entity must find all 6 memories even after Temporal CF compaction"
+    );
+
+    assert_eq!(engine.count().unwrap(), 0);
+}
+
 /// Phase 5: forget creates deserializable tombstones in the meta CF.
 #[test]
 fn forget_creates_tombstones_rocksdb() {

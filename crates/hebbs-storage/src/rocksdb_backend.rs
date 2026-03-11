@@ -2,8 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rocksdb::{
-    BlockBasedOptions, DBWithThreadMode, MultiThreaded, Options, SliceTransform,
-    WriteBatchWithTransaction,
+    BlockBasedOptions, DBWithThreadMode, MultiThreaded, Options, WriteBatchWithTransaction,
 };
 
 use crate::error::{ColumnFamilyName, Result, StorageError};
@@ -87,11 +86,6 @@ impl RocksDbBackend {
                 cf_opts.set_write_buffer_size(64 * 1024 * 1024);
                 cf_opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
                 cf_opts.set_bottommost_compression_type(rocksdb::DBCompressionType::Zstd);
-
-                if *name == ColumnFamilyName::Temporal.as_str() {
-                    // Temporal CF uses prefix-based iteration on entity_id
-                    cf_opts.set_prefix_extractor(SliceTransform::create_noop());
-                }
 
                 rocksdb::ColumnFamilyDescriptor::new(*name, cf_opts)
             })
@@ -219,6 +213,7 @@ impl StorageBackend for RocksDbBackend {
         let handle = self.cf_handle(cf)?;
         let mut read_opts = rocksdb::ReadOptions::default();
         read_opts.set_iterate_upper_bound(end.to_vec());
+        read_opts.set_total_order_seek(true);
 
         let iter = self.db.iterator_cf_opt(
             &handle,
@@ -427,6 +422,42 @@ mod tests {
         assert_eq!(
             backend.get(ColumnFamilyName::Default, b"persist").unwrap(),
             Some(b"value".to_vec())
+        );
+    }
+
+    /// Regression: range_iterator on the Temporal CF must return correct results
+    /// after compaction flushes data from the memtable to SST files.
+    #[test]
+    fn range_iterator_temporal_after_compaction() {
+        let (backend, _dir) = temp_backend();
+
+        let separator: u8 = 0xFF;
+        for ts in [100u64, 200, 300, 400, 500] {
+            let mut key = b"entity_a".to_vec();
+            key.push(separator);
+            key.extend_from_slice(&ts.to_be_bytes());
+            backend
+                .put(ColumnFamilyName::Temporal, &key, &[ts as u8; 16])
+                .unwrap();
+        }
+
+        backend.compact(ColumnFamilyName::Temporal).unwrap();
+
+        let mut start = b"entity_a".to_vec();
+        start.push(separator);
+        start.extend_from_slice(&0u64.to_be_bytes());
+
+        let mut end = b"entity_a".to_vec();
+        end.push(separator);
+        end.extend_from_slice(&u64::MAX.to_be_bytes());
+
+        let results = backend
+            .range_iterator(ColumnFamilyName::Temporal, &start, &end)
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            5,
+            "all 5 temporal keys must be returned after compaction"
         );
     }
 }

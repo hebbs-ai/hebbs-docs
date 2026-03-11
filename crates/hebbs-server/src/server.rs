@@ -231,6 +231,8 @@ pub async fn run(config: HebbsConfig) -> Result<(), Box<dyn std::error::Error>> 
                 )
             }
         };
+    let rest_reflect_config = reflect_config.clone();
+
     let reflect_svc = ReflectServiceImpl {
         engine: engine.clone(),
         metrics: metrics.clone(),
@@ -257,6 +259,7 @@ pub async fn run(config: HebbsConfig) -> Result<(), Box<dyn std::error::Error>> 
         sse_subscriptions: std::sync::Arc::new(parking_lot::Mutex::new(
             std::collections::HashMap::new(),
         )),
+        reflect_config: Some(rest_reflect_config),
     };
 
     let http_router = rest::create_router(app_state)

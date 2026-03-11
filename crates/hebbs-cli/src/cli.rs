@@ -245,6 +245,28 @@ pub enum Commands {
         since_us: Option<u64>,
     },
 
+    /// Prepare reflection data for agent-driven two-step reflect (no LLM call)
+    ReflectPrepare {
+        /// Entity ID scope (omit for global)
+        #[arg(short, long)]
+        entity_id: Option<String>,
+
+        /// Only process memories since this timestamp (microseconds)
+        #[arg(long)]
+        since_us: Option<u64>,
+    },
+
+    /// Commit agent-produced insights from a previous reflect-prepare session
+    ReflectCommit {
+        /// Session ID from reflect-prepare output
+        #[arg(short, long)]
+        session_id: String,
+
+        /// JSON array of insights to commit
+        #[arg(short, long)]
+        insights: String,
+    },
+
     /// Query consolidated insights
     Insights {
         /// Entity ID filter

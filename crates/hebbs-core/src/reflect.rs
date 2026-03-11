@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,8 +8,11 @@ use ulid::Generator;
 
 use hebbs_embed::Embedder;
 use hebbs_index::{EdgeInput, EdgeType, IndexManager};
+use hebbs_reflect::cluster::{cluster_embeddings, ClusterConfig};
+use hebbs_reflect::prompt::{build_proposal_prompt, build_validation_prompt};
 use hebbs_reflect::{
-    LlmProvider, LlmProviderConfig, MemoryEntry, PipelineConfig, ReflectInput, ReflectPipeline,
+    CandidateInsight, LlmProvider, LlmProviderConfig, MemoryEntry, PipelineConfig, ReflectInput,
+    ReflectPipeline,
 };
 use hebbs_storage::{BatchOperation, ColumnFamilyName, StorageBackend};
 
@@ -121,6 +124,87 @@ pub struct InsightsFilter {
     pub entity_id: Option<String>,
     pub min_confidence: Option<f32>,
     pub max_results: Option<usize>,
+}
+
+// ── Agent-driven reflect types ────────────────────────────────────
+
+const SESSION_TTL_US: u64 = 600_000_000; // 10 minutes
+
+/// Summary of a memory within a prepared cluster.
+#[derive(Debug, Clone)]
+pub struct ClusterMemorySummary {
+    pub memory_id: [u8; 16],
+    pub content: String,
+    pub importance: f32,
+    pub entity_id: Option<String>,
+    pub created_at: u64,
+}
+
+/// Data for a single cluster returned by `reflect_prepare`.
+#[derive(Debug, Clone)]
+pub struct PreparedCluster {
+    pub cluster_id: u32,
+    pub member_count: u32,
+    pub proposal_system_prompt: String,
+    pub proposal_user_prompt: String,
+    pub memory_ids: Vec<[u8; 16]>,
+    pub validation_context: String,
+    pub memories: Vec<ClusterMemorySummary>,
+}
+
+/// Output of `reflect_prepare`.
+#[derive(Debug)]
+pub struct ReflectPrepareResult {
+    pub session_id: String,
+    pub memories_processed: usize,
+    pub clusters: Vec<PreparedCluster>,
+    pub existing_insight_count: usize,
+}
+
+/// Output of `reflect_commit`.
+#[derive(Debug)]
+pub struct ReflectCommitResult {
+    pub insights_created: usize,
+}
+
+/// Captures state between `reflect_prepare` and `reflect_commit`.
+#[derive(Debug)]
+pub(crate) struct ReflectSession {
+    pub scope: ReflectScope,
+    pub cluster_members: HashMap<u32, Vec<[u8; 16]>>,
+    pub created_at: u64,
+}
+
+/// In-memory store for pending reflect sessions with TTL expiry.
+pub struct ReflectSessionStore {
+    inner: Mutex<HashMap<String, ReflectSession>>,
+}
+
+impl ReflectSessionStore {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub(crate) fn create(&self, session: ReflectSession) -> String {
+        let mut map = self.inner.lock().expect("session store lock poisoned");
+        Self::cleanup_expired_locked(&mut map);
+        let id = ulid::Ulid::new().to_string();
+        map.insert(id.clone(), session);
+        id
+    }
+
+    pub(crate) fn take(&self, session_id: &str) -> Option<ReflectSession> {
+        let mut map = self.inner.lock().expect("session store lock poisoned");
+        Self::cleanup_expired_locked(&mut map);
+        map.remove(session_id)
+    }
+
+    fn cleanup_expired_locked(map: &mut HashMap<String, ReflectSession>) {
+        let now = now_microseconds();
+        map.retain(|_, s| now.saturating_sub(s.created_at) < SESSION_TTL_US);
+    }
 }
 
 // ── Background worker ─────────────────────────────────────────────
@@ -322,7 +406,29 @@ pub(crate) fn run_reflect_shared(
         ReflectScope::Global { .. } => None,
     };
 
+    // For global scope, build a lookup so we can infer entity_id per insight
+    // from its source memories (when all sources agree on the same entity).
+    let entity_id_map = if scope_entity_id.is_none() {
+        build_entity_id_map(&memories)
+    } else {
+        HashMap::new()
+    };
+
     for produced in &output.insights {
+        let effective_entity_id = match &scope_entity_id {
+            Some(eid) => Some(eid.as_str()),
+            None => None,
+        };
+        let inferred;
+        let effective_entity_id = match effective_entity_id {
+            Some(eid) => Some(eid),
+            None => {
+                inferred =
+                    infer_entity_id_from_sources(&produced.source_memory_ids, &entity_id_map);
+                inferred.as_deref()
+            }
+        };
+
         match store_insight(
             storage,
             embedder,
@@ -330,7 +436,7 @@ pub(crate) fn run_reflect_shared(
             subscribe_registry,
             &mut ulid_gen,
             produced,
-            scope_entity_id.as_deref(),
+            effective_entity_id,
         ) {
             Ok(_) => insights_created += 1,
             Err(_) => continue,
@@ -370,6 +476,231 @@ fn run_reflect_background(
         proposal_provider.as_ref(),
         validation_provider.as_ref(),
     )
+}
+
+// ── Agent-driven reflect: prepare + commit ────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reflect_prepare_shared(
+    storage: &Arc<dyn StorageBackend>,
+    _embedder: &Arc<dyn Embedder>,
+    config: &ReflectConfig,
+    scope: &ReflectScope,
+    session_store: &Arc<ReflectSessionStore>,
+) -> Result<ReflectPrepareResult> {
+    let memories = scope_memories(storage, scope, config)?;
+    let memories_count = memories.len();
+
+    if memories_count < config.min_memories_for_reflect {
+        let session = ReflectSession {
+            scope: scope.clone(),
+            cluster_members: HashMap::new(),
+            created_at: now_microseconds(),
+        };
+        let session_id = session_store.create(session);
+        return Ok(ReflectPrepareResult {
+            session_id,
+            memories_processed: memories_count,
+            clusters: Vec::new(),
+            existing_insight_count: 0,
+        });
+    }
+
+    let existing_insights = load_existing_insights(storage)?;
+    let existing_count = existing_insights.len();
+
+    let entries: Vec<MemoryEntry> = memories.iter().map(memory_to_entry).collect();
+    let existing_entries: Vec<MemoryEntry> = existing_insights.iter().map(memory_to_entry).collect();
+
+    let embeddings: Vec<Vec<f32>> = entries
+        .iter()
+        .map(|m| {
+            if m.assoc_embedding.is_empty() {
+                m.embedding.clone()
+            } else {
+                m.assoc_embedding.clone()
+            }
+        })
+        .collect();
+
+    let cluster_config = ClusterConfig {
+        min_cluster_size: config.min_cluster_size,
+        max_clusters: config.max_clusters,
+        seed: config.clustering_seed,
+        max_iterations: config.max_iterations,
+        silhouette_subsample: 500,
+    };
+
+    let raw_clusters = cluster_embeddings(&embeddings, &cluster_config).map_err(|e| {
+        HebbsError::Internal {
+            operation: "reflect_prepare",
+            message: format!("clustering failed: {e}"),
+        }
+    })?;
+
+    let pipeline_config = config.to_pipeline_config();
+    let mut prepared = Vec::with_capacity(raw_clusters.len());
+    let mut cluster_member_map: HashMap<u32, Vec<[u8; 16]>> = HashMap::new();
+
+    for cluster in &raw_clusters {
+        let cluster_memories: Vec<&MemoryEntry> = cluster
+            .member_indices
+            .iter()
+            .map(|&i| &entries[i])
+            .collect();
+
+        let memory_ids: Vec<[u8; 16]> = cluster_memories.iter().map(|m| m.id).collect();
+        let cid = cluster.cluster_id as u32;
+
+        let (sys_prompt, user_prompt) = build_proposal_prompt(
+            &cluster_memories,
+            &cluster.centroid,
+            pipeline_config.proposal_max_tokens,
+        );
+
+        let existing_refs: Vec<&MemoryEntry> = existing_entries.iter().collect();
+        let dummy_candidates: Vec<CandidateInsight> = Vec::new();
+        let (val_sys, val_user) = build_validation_prompt(
+            &dummy_candidates,
+            &cluster_memories,
+            &existing_refs,
+            pipeline_config.validation_max_tokens,
+        );
+
+        let validation_ctx = serde_json::json!({
+            "validation_system_prompt": val_sys,
+            "validation_user_prompt": val_user,
+            "source_memories": cluster_memories.iter().map(|m| {
+                serde_json::json!({
+                    "id": hex::encode(m.id),
+                    "content": m.content,
+                    "importance": m.importance,
+                })
+            }).collect::<Vec<_>>(),
+            "existing_insights": existing_entries.iter().take(50).map(|m| {
+                serde_json::json!({
+                    "id": hex::encode(m.id),
+                    "content": m.content,
+                })
+            }).collect::<Vec<_>>(),
+        });
+
+        cluster_member_map.insert(cid, memory_ids.clone());
+
+        let memories: Vec<ClusterMemorySummary> = cluster_memories
+            .iter()
+            .map(|m| ClusterMemorySummary {
+                memory_id: m.id,
+                content: m.content.clone(),
+                importance: m.importance,
+                entity_id: m.entity_id.clone(),
+                created_at: m.created_at,
+            })
+            .collect();
+
+        prepared.push(PreparedCluster {
+            cluster_id: cid,
+            member_count: cluster.member_indices.len() as u32,
+            proposal_system_prompt: sys_prompt,
+            proposal_user_prompt: user_prompt,
+            memory_ids,
+            validation_context: validation_ctx.to_string(),
+            memories,
+        });
+    }
+
+    let session = ReflectSession {
+        scope: scope.clone(),
+        cluster_members: cluster_member_map,
+        created_at: now_microseconds(),
+    };
+    let session_id = session_store.create(session);
+
+    Ok(ReflectPrepareResult {
+        session_id,
+        memories_processed: memories_count,
+        clusters: prepared,
+        existing_insight_count: existing_count,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn reflect_commit_shared(
+    storage: &Arc<dyn StorageBackend>,
+    embedder: &Arc<dyn Embedder>,
+    index_manager: &Arc<IndexManager>,
+    subscribe_registry: &Arc<SubscriptionRegistry>,
+    session_store: &Arc<ReflectSessionStore>,
+    session_id: &str,
+    insights: Vec<hebbs_reflect::ProducedInsight>,
+) -> Result<ReflectCommitResult> {
+    let session = session_store.take(session_id).ok_or_else(|| {
+        HebbsError::InvalidInput {
+            operation: "reflect_commit",
+            message: format!("session '{session_id}' not found or expired"),
+        }
+    })?;
+
+    let all_valid_ids: std::collections::HashSet<[u8; 16]> = session
+        .cluster_members
+        .values()
+        .flat_map(|ids: &Vec<[u8; 16]>| ids.iter().copied())
+        .collect();
+
+    let mut ulid_gen = Generator::new();
+    let mut created = 0usize;
+
+    let scope_entity_id = match &session.scope {
+        ReflectScope::Entity { entity_id, .. } => Some(entity_id.clone()),
+        ReflectScope::Global { .. } => None,
+    };
+
+    // For global scope, build a lookup so we can infer entity_id per insight.
+    let entity_id_map = if scope_entity_id.is_none() {
+        build_entity_id_map_from_storage(storage, &all_valid_ids)
+    } else {
+        HashMap::new()
+    };
+
+    for produced in &insights {
+        let sources_valid = produced
+            .source_memory_ids
+            .iter()
+            .all(|id| all_valid_ids.contains(id));
+
+        if !sources_valid {
+            continue;
+        }
+
+        let inferred;
+        let effective_entity_id = match scope_entity_id.as_deref() {
+            Some(eid) => Some(eid),
+            None => {
+                inferred =
+                    infer_entity_id_from_sources(&produced.source_memory_ids, &entity_id_map);
+                inferred.as_deref()
+            }
+        };
+
+        match store_insight(
+            storage,
+            embedder,
+            index_manager,
+            subscribe_registry,
+            &mut ulid_gen,
+            produced,
+            effective_entity_id,
+        ) {
+            Ok(_) => created += 1,
+            Err(_) => continue,
+        }
+    }
+
+    update_reflect_cursor(storage, &session.scope)?;
+
+    Ok(ReflectCommitResult {
+        insights_created: created,
+    })
 }
 
 // ── Scoping ───────────────────────────────────────────────────────
@@ -614,6 +945,56 @@ pub(crate) fn read_stale_insight_ids(storage: &Arc<dyn StorageBackend>) -> Vec<[
             }
         })
         .collect()
+}
+
+// ── Entity-ID inference for global-scope insights ────────────────
+
+/// Build a memory-ID → entity_id lookup from a slice of loaded memories.
+fn build_entity_id_map(memories: &[Memory]) -> HashMap<[u8; 16], Option<String>> {
+    memories
+        .iter()
+        .map(|m| {
+            let mut id = [0u8; 16];
+            let len = m.memory_id.len().min(16);
+            id[..len].copy_from_slice(&m.memory_id[..len]);
+            (id, m.entity_id.clone())
+        })
+        .collect()
+}
+
+/// Build a memory-ID → entity_id lookup by fetching memories from storage.
+fn build_entity_id_map_from_storage(
+    storage: &Arc<dyn StorageBackend>,
+    memory_ids: &std::collections::HashSet<[u8; 16]>,
+) -> HashMap<[u8; 16], Option<String>> {
+    memory_ids
+        .iter()
+        .filter_map(|id| {
+            let key = keys::encode_memory_key(id);
+            let bytes = storage.get(ColumnFamilyName::Default, &key).ok()??;
+            let mem = Memory::from_bytes(&bytes).ok()?;
+            Some((*id, mem.entity_id))
+        })
+        .collect()
+}
+
+/// When all source memories with a non-None entity_id agree on the same
+/// value, return that entity_id.  If sources disagree, return None.
+fn infer_entity_id_from_sources(
+    source_ids: &[[u8; 16]],
+    entity_id_map: &HashMap<[u8; 16], Option<String>>,
+) -> Option<String> {
+    let mut common: Option<&str> = None;
+    for source_id in source_ids {
+        if let Some(Some(eid)) = entity_id_map.get(source_id) {
+            match common {
+                None => common = Some(eid.as_str()),
+                Some(prev) if prev == eid.as_str() => {}
+                Some(_) => return None, // disagreement among sources
+            }
+        }
+    }
+    common.map(|s| s.to_string())
 }
 
 // ── Cursor management ─────────────────────────────────────────────

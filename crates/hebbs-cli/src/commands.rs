@@ -16,6 +16,7 @@ pub async fn execute(
     conn: &mut ConnectionManager,
     renderer: &Renderer,
     http_port: u16,
+    tenant_id: Option<&str>,
 ) -> i32 {
     let start = Instant::now();
     let mut stdout = io::stdout();
@@ -36,12 +37,13 @@ pub async fn execute(
                 context,
                 entity_id,
                 edge,
+                tenant_id,
                 &mut stdout,
             )
             .await
         }
 
-        Commands::Get { id } => execute_get(conn, renderer, &id, &mut stdout).await,
+        Commands::Get { id } => execute_get(conn, renderer, &id, tenant_id, &mut stdout).await,
 
         Commands::Recall {
             cue,
@@ -70,6 +72,7 @@ pub async fn execute(
                 edge_types,
                 time_range,
                 analogical_alpha,
+                tenant_id,
                 &mut stdout,
             )
             .await
@@ -94,6 +97,7 @@ pub async fn execute(
                 context_mode,
                 entity_id,
                 edge,
+                tenant_id,
                 &mut stdout,
             )
             .await
@@ -116,6 +120,7 @@ pub async fn execute(
                 access_floor,
                 kind,
                 decay_floor,
+                tenant_id,
                 &mut stdout,
             )
             .await
@@ -136,6 +141,7 @@ pub async fn execute(
                 max_memories,
                 recency_us,
                 similarity_cue,
+                tenant_id,
                 &mut stdout,
             )
             .await
@@ -144,17 +150,33 @@ pub async fn execute(
         Commands::Subscribe {
             entity_id,
             confidence,
-        } => execute_subscribe(conn, renderer, entity_id, confidence, &mut stdout).await,
+        } => execute_subscribe(conn, renderer, entity_id, confidence, tenant_id, &mut stdout).await,
 
         Commands::Feed {
             subscription_id,
             text,
-        } => execute_feed(conn, renderer, subscription_id, text, &mut stdout).await,
+        } => execute_feed(conn, renderer, subscription_id, text, tenant_id, &mut stdout).await,
 
         Commands::Reflect {
             entity_id,
             since_us,
-        } => execute_reflect(conn, renderer, entity_id, since_us, &mut stdout).await,
+        } => execute_reflect(conn, renderer, entity_id, since_us, tenant_id, &mut stdout).await,
+
+        Commands::ReflectPrepare {
+            entity_id,
+            since_us,
+        } => {
+            execute_reflect_prepare(conn, renderer, entity_id, since_us, tenant_id, &mut stdout)
+                .await
+        }
+
+        Commands::ReflectCommit {
+            session_id,
+            insights,
+        } => {
+            execute_reflect_commit(conn, renderer, &session_id, &insights, tenant_id, &mut stdout)
+                .await
+        }
 
         Commands::Insights {
             entity_id,
@@ -167,6 +189,7 @@ pub async fn execute(
                 entity_id,
                 min_confidence,
                 max_results,
+                tenant_id,
                 &mut stdout,
             )
             .await
@@ -174,10 +197,10 @@ pub async fn execute(
 
         Commands::Status => execute_status(conn, renderer, &mut stdout).await,
 
-        Commands::Inspect { id } => execute_inspect(conn, renderer, &id, &mut stdout).await,
+        Commands::Inspect { id } => execute_inspect(conn, renderer, &id, tenant_id, &mut stdout).await,
 
         Commands::Export { entity_id, limit } => {
-            execute_export(conn, renderer, entity_id, limit, &mut stdout).await
+            execute_export(conn, renderer, entity_id, limit, tenant_id, &mut stdout).await
         }
 
         Commands::Metrics => execute_metrics(conn, renderer, http_port, &mut stdout).await,
@@ -291,6 +314,7 @@ async fn execute_remember(
     context: Option<String>,
     entity_id: Option<String>,
     edge_specs: Vec<String>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let content = read_stdin_content(content)?;
@@ -311,7 +335,7 @@ async fn execute_remember(
         context: proto_context,
         entity_id,
         edges,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.memory_client().await?;
@@ -336,6 +360,7 @@ async fn execute_get(
     conn: &mut ConnectionManager,
     renderer: &Renderer,
     id: &str,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let memory_id =
@@ -343,7 +368,7 @@ async fn execute_get(
 
     let req = pb::GetRequest {
         memory_id,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
     let mut client = conn.memory_client().await?;
     let resp = client
@@ -378,6 +403,7 @@ async fn execute_recall(
     edge_types: Option<Vec<String>>,
     time_range: Option<String>,
     analogical_alpha: Option<f32>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let cue = cue.unwrap_or_default();
@@ -463,7 +489,7 @@ async fn execute_recall(
         top_k: Some(top_k),
         scoring_weights,
         cue_context: None,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.memory_client().await?;
@@ -499,6 +525,7 @@ async fn execute_revise(
     context_mode: ContextModeArg,
     entity_id: Option<String>,
     edge_specs: Vec<String>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let memory_id =
@@ -527,7 +554,7 @@ async fn execute_revise(
         context_mode: cm as i32,
         entity_id,
         edges,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.memory_client().await?;
@@ -558,6 +585,7 @@ async fn execute_forget(
     access_floor: Option<u64>,
     kind: Option<KindArg>,
     decay_floor: Option<f32>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let memory_ids: Vec<Vec<u8>> = ids
@@ -591,7 +619,7 @@ async fn execute_forget(
         access_count_floor: access_floor,
         memory_kind,
         decay_score_floor: decay_floor,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.memory_client().await?;
@@ -618,6 +646,7 @@ async fn execute_prime(
     max_memories: Option<u32>,
     recency_us: Option<u64>,
     similarity_cue: Option<String>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let proto_context = match context {
@@ -634,7 +663,7 @@ async fn execute_prime(
         recency_window_us: recency_us,
         similarity_cue,
         scoring_weights: None,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.memory_client().await?;
@@ -658,6 +687,7 @@ async fn execute_subscribe(
     renderer: &Renderer,
     entity_id: Option<String>,
     confidence: f32,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let req = pb::SubscribeRequest {
@@ -667,7 +697,7 @@ async fn execute_subscribe(
         time_scope_us: None,
         output_buffer_size: None,
         coarse_threshold: None,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.subscribe_client().await?;
@@ -710,12 +740,13 @@ async fn execute_feed(
     _renderer: &Renderer,
     subscription_id: u64,
     text: String,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let req = pb::FeedRequest {
         subscription_id,
         text,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.subscribe_client().await?;
@@ -733,6 +764,7 @@ async fn execute_reflect(
     renderer: &Renderer,
     entity_id: Option<String>,
     since_us: Option<u64>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let scope = match entity_id {
@@ -751,7 +783,7 @@ async fn execute_reflect(
 
     let req = pb::ReflectRequest {
         scope: Some(scope),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.reflect_client().await?;
@@ -769,19 +801,129 @@ async fn execute_reflect(
     Ok(())
 }
 
+async fn execute_reflect_prepare(
+    conn: &mut ConnectionManager,
+    renderer: &Renderer,
+    entity_id: Option<String>,
+    since_us: Option<u64>,
+    tenant_id: Option<&str>,
+    w: &mut dyn Write,
+) -> Result<(), CliError> {
+    let scope = match entity_id {
+        Some(eid) => pb::ReflectScope {
+            scope: Some(pb::reflect_scope::Scope::Entity(pb::EntityScope {
+                entity_id: eid,
+                since_us,
+            })),
+        },
+        None => pb::ReflectScope {
+            scope: Some(pb::reflect_scope::Scope::Global(pb::GlobalScope {
+                since_us,
+            })),
+        },
+    };
+
+    let req = pb::ReflectPrepareRequest {
+        scope: Some(scope),
+        tenant_id: tenant_id.map(str::to_string),
+    };
+
+    let mut client = conn.reflect_client().await?;
+    let resp = client
+        .reflect_prepare(req)
+        .await
+        .map_err(|s| CliError::from_status(s, conn.endpoint()))?;
+
+    renderer
+        .render_reflect_prepare_result(&resp.into_inner(), w)
+        .map_err(|e| CliError::Internal {
+            message: e.to_string(),
+        })?;
+
+    Ok(())
+}
+
+async fn execute_reflect_commit(
+    conn: &mut ConnectionManager,
+    renderer: &Renderer,
+    session_id: &str,
+    insights_json: &str,
+    tenant_id: Option<&str>,
+    w: &mut dyn Write,
+) -> Result<(), CliError> {
+    let parsed: Vec<serde_json::Value> =
+        serde_json::from_str(insights_json).map_err(|e| CliError::InvalidArgument {
+            message: format!("invalid JSON for --insights: {e}"),
+        })?;
+
+    let insights: Vec<pb::ProducedInsightInput> = parsed
+        .iter()
+        .map(|v| {
+            let content = v["content"].as_str().unwrap_or_default().to_string();
+            let confidence = v["confidence"].as_f64().unwrap_or(0.8) as f32;
+            let source_memory_ids: Vec<String> = v["source_memory_ids"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let tags: Vec<String> = v["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let cluster_id = v["cluster_id"].as_u64().map(|n| n as u32);
+
+            pb::ProducedInsightInput {
+                content,
+                confidence,
+                source_memory_ids,
+                tags,
+                cluster_id,
+            }
+        })
+        .collect();
+
+    let req = pb::ReflectCommitRequest {
+        session_id: session_id.to_string(),
+        insights,
+        tenant_id: tenant_id.map(str::to_string),
+    };
+
+    let mut client = conn.reflect_client().await?;
+    let resp = client
+        .reflect_commit(req)
+        .await
+        .map_err(|s| CliError::from_status(s, conn.endpoint()))?;
+
+    renderer
+        .render_reflect_commit_result(&resp.into_inner(), w)
+        .map_err(|e| CliError::Internal {
+            message: e.to_string(),
+        })?;
+
+    Ok(())
+}
+
 async fn execute_insights(
     conn: &mut ConnectionManager,
     renderer: &Renderer,
     entity_id: Option<String>,
     min_confidence: Option<f32>,
     max_results: Option<u32>,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let req = pb::GetInsightsRequest {
         entity_id,
         min_confidence,
         max_results,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.reflect_client().await?;
@@ -831,6 +973,7 @@ async fn execute_inspect(
     conn: &mut ConnectionManager,
     renderer: &Renderer,
     id: &str,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let memory_id =
@@ -839,7 +982,7 @@ async fn execute_inspect(
     // 1. Get the memory detail
     let get_req = pb::GetRequest {
         memory_id: memory_id.clone(),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
     let mut client = conn.memory_client().await?;
     let get_resp = client
@@ -878,7 +1021,7 @@ async fn execute_inspect(
         top_k: Some(20),
         scoring_weights: None,
         cue_context: None,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let recall_resp = client.recall(recall_req).await;
@@ -920,7 +1063,7 @@ async fn execute_inspect(
             top_k: Some(6),
             scoring_weights: None,
             cue_context: None,
-            tenant_id: None,
+            tenant_id: tenant_id.map(str::to_string),
         };
 
         let sim_resp = client.recall(sim_req).await;
@@ -958,6 +1101,7 @@ async fn execute_export(
     renderer: &Renderer,
     entity_id: Option<String>,
     limit: u32,
+    tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let capped_limit = limit.min(10000);
@@ -980,7 +1124,7 @@ async fn execute_export(
         top_k: Some(capped_limit),
         scoring_weights: None,
         cue_context: None,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     };
 
     let mut client = conn.memory_client().await?;

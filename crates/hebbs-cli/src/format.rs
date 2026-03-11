@@ -615,6 +615,95 @@ impl Renderer {
         }
     }
 
+    pub fn render_reflect_prepare_result(
+        &self,
+        resp: &pb::ReflectPrepareResponse,
+        w: &mut dyn Write,
+    ) -> std::io::Result<()> {
+        match self.format {
+            OutputFormat::Human => {
+                writeln!(
+                    w,
+                    "Session: {}\nMemories processed: {}\nClusters: {}\nExisting insights: {}",
+                    resp.session_id,
+                    resp.memories_processed,
+                    resp.clusters.len(),
+                    resp.existing_insight_count
+                )?;
+                for c in &resp.clusters {
+                    writeln!(
+                        w,
+                        "\n  Cluster {}: {} members",
+                        c.cluster_id,
+                        c.member_count,
+                    )?;
+                    for m in &c.memories {
+                        let preview = truncate_content(&m.content, 60);
+                        writeln!(
+                            w,
+                            "    [{:.2}] {} — {}",
+                            m.importance, m.memory_id, preview,
+                        )?;
+                    }
+                }
+                Ok(())
+            }
+            OutputFormat::Json => {
+                let clusters: Vec<serde_json::Value> = resp
+                    .clusters
+                    .iter()
+                    .map(|c| {
+                        let memories: Vec<serde_json::Value> = c.memories.iter().map(|m| {
+                            serde_json::json!({
+                                "memory_id": m.memory_id,
+                                "content": m.content,
+                                "importance": m.importance,
+                                "entity_id": m.entity_id,
+                                "created_at": m.created_at,
+                            })
+                        }).collect();
+                        serde_json::json!({
+                            "cluster_id": c.cluster_id,
+                            "member_count": c.member_count,
+                            "proposal_system_prompt": c.proposal_system_prompt,
+                            "proposal_user_prompt": c.proposal_user_prompt,
+                            "memory_ids": c.memory_ids,
+                            "validation_context": serde_json::from_str::<serde_json::Value>(&c.validation_context).unwrap_or(serde_json::Value::Null),
+                            "memories": memories,
+                        })
+                    })
+                    .collect();
+                let json = serde_json::json!({
+                    "session_id": resp.session_id,
+                    "memories_processed": resp.memories_processed,
+                    "clusters": clusters,
+                    "existing_insight_count": resp.existing_insight_count,
+                });
+                writeln!(w, "{}", serde_json::to_string_pretty(&json).unwrap_or_default())
+            }
+            OutputFormat::Raw => writeln!(w, "{:?}", resp),
+        }
+    }
+
+    pub fn render_reflect_commit_result(
+        &self,
+        resp: &pb::ReflectCommitResponse,
+        w: &mut dyn Write,
+    ) -> std::io::Result<()> {
+        match self.format {
+            OutputFormat::Human => {
+                writeln!(w, "Insights committed: {}", resp.insights_created)
+            }
+            OutputFormat::Json => {
+                let json = serde_json::json!({
+                    "insights_created": resp.insights_created,
+                });
+                writeln!(w, "{}", serde_json::to_string(&json).unwrap_or_default())
+            }
+            OutputFormat::Raw => writeln!(w, "{:?}", resp),
+        }
+    }
+
     pub fn render_subscribe_push(
         &self,
         push: &pb::SubscribePushMessage,

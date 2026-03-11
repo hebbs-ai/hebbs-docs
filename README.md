@@ -253,6 +253,84 @@ Nine operations. Three groups.
 
 ---
 
+## Scoping: Entities and Tenants
+
+HEBBS has two scoping dimensions that keep data organized and isolated.
+
+### `entity_id` — what the memory is about
+
+An entity is a domain-level grouping. It represents the subject a memory relates to: a customer, a project, a conversation, a user. Entity IDs are **optional** — memories without one live in a global, unscoped pool.
+
+- `recall` and `prime` can be scoped to an entity for focused retrieval
+- `temporal` recall requires an entity (it queries "recent history for *this* subject")
+- `forget` by entity deletes all memories for that subject (GDPR erasure path)
+- Cross-entity `similarity` recall works within the same tenant — "what did I learn from Acme that applies to Initech?"
+
+### `tenant_id` — who owns the data
+
+A tenant is an infrastructure-level isolation boundary. It represents the organization, workspace, or deployment that owns the data. Tenant isolation is **structural** — storage keys are prefixed, index traversal is partitioned, and data from one tenant is invisible to another.
+
+- In authenticated mode, `tenant_id` is derived automatically from the API key
+- SDKs accept an explicit `tenant_id` at construction time for `--no-auth` deployments
+- One HEBBS instance serves many tenants; each tenant can have many entities
+
+<details>
+<summary>Python</summary>
+
+```python
+# tenant_id set at construction — applied to all operations
+client = HebbsClient("localhost:6380", tenant_id="acme-corp")
+await client.remember(content="Q2 forecast looks strong", entity_id="project-alpha")
+```
+
+</details>
+
+<details>
+<summary>TypeScript</summary>
+
+```typescript
+const client = new HebbsClient('localhost:6380', { tenantId: 'acme-corp' });
+await client.connect();
+await client.remember({ content: 'Q2 forecast looks strong', entityId: 'project-alpha' });
+```
+
+</details>
+
+<details>
+<summary>Rust</summary>
+
+```rust
+let client = HebbsClient::builder()
+    .endpoint("http://localhost:6380")
+    .tenant_id("acme-corp")
+    .build()
+    .await?;
+```
+
+</details>
+
+<details>
+<summary>CLI</summary>
+
+```bash
+hebbs-cli --tenant acme-corp remember "Q2 forecast looks strong" --entity-id project-alpha
+# Or via environment variable:
+export HEBBS_TENANT=acme-corp
+hebbs-cli remember "Q2 forecast looks strong" --entity-id project-alpha
+```
+
+</details>
+
+| | Entity (`entity_id`) | Tenant (`tenant_id`) |
+|---|---|---|
+| **Purpose** | Domain grouping ("about what") | Infrastructure isolation ("owned by whom") |
+| **Isolation** | Logical (query filters) | Structural (storage prefix, index partitioning) |
+| **Required** | No — optional on all operations | No — derived from API key, or set explicitly |
+| **Cross-scope queries** | Yes, within the same tenant | Never — tenants are hard boundaries |
+| **Maps to** | Customer, user, project, conversation | Organization, workspace, deployment |
+
+---
+
 ## Four Recall Strategies
 
 Most memory systems give you one retrieval mode: similarity search. HEBBS gives you four.

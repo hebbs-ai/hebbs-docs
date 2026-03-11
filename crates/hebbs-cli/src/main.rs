@@ -43,6 +43,9 @@ fn main() {
             ColorArg::Auto => ColorMode::Auto,
         };
     }
+    if cli.tenant.is_some() {
+        config.tenant = cli.tenant.clone();
+    }
 
     init_tracing(cli.verbose);
 
@@ -60,10 +63,13 @@ fn main() {
         let mut conn = ConnectionManager::new(config.endpoint.clone(), config.timeout_ms)
             .with_api_key(cli.api_key.clone());
 
+        let tenant_id = config.tenant.as_deref();
+
         match cli.command {
             Some(cmd) => {
                 let exit_code =
-                    commands::execute(cmd, &mut conn, &renderer, config.http_port).await;
+                    commands::execute(cmd, &mut conn, &renderer, config.http_port, tenant_id)
+                        .await;
                 std::process::exit(exit_code);
             }
             None => {
@@ -73,6 +79,7 @@ fn main() {
                     &config.history_file,
                     config.max_history,
                     config.http_port,
+                    tenant_id,
                 )
                 .await;
             }

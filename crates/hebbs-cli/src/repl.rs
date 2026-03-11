@@ -71,6 +71,7 @@ static FLAGS: &[&str] = &[
     "--since-us",
     "--limit",
     "--format",
+    "--tenant",
 ];
 
 static STRATEGY_VALUES: &[&str] = &["similarity", "temporal", "causal", "analogical"];
@@ -170,6 +171,7 @@ pub async fn run_repl(
     history_file: &std::path::Path,
     max_history: usize,
     http_port: u16,
+    tenant_id: Option<&str>,
 ) {
     let config = Config::builder()
         .max_history_size(max_history)
@@ -222,7 +224,7 @@ pub async fn run_repl(
                 }
 
                 if trimmed.starts_with('.') {
-                    if handle_dot_command(trimmed, conn, renderer, http_port).await {
+                    if handle_dot_command(trimmed, conn, renderer, http_port, tenant_id).await {
                         break;
                     }
                     continue;
@@ -254,7 +256,7 @@ pub async fn run_repl(
                         };
 
                         let _exit_code =
-                            commands::execute(reparsed, conn, renderer, http_port).await;
+                            commands::execute(reparsed, conn, renderer, http_port, tenant_id).await;
                     }
                     Err(e) => {
                         let rendered = e.render();
@@ -291,6 +293,7 @@ async fn handle_dot_command(
     conn: &mut ConnectionManager,
     renderer: &Renderer,
     http_port: u16,
+    tenant_id: Option<&str>,
 ) -> bool {
     let parts: Vec<&str> = input.split_whitespace().collect();
     let cmd = parts.first().copied().unwrap_or("");
@@ -326,7 +329,7 @@ async fn handle_dot_command(
         }
         ".status" => {
             let _exit_code =
-                commands::execute(cli::Commands::Status, conn, renderer, http_port).await;
+                commands::execute(cli::Commands::Status, conn, renderer, http_port, tenant_id).await;
         }
         ".clear" => {
             print!("\x1B[2J\x1B[H");
@@ -383,6 +386,7 @@ fn print_help() {
     println!("    .clear           Clear the terminal");
     println!();
     println!("  Global Flags:");
+    println!("    --tenant ID                Tenant ID for data isolation");
     println!("    --format human|json|raw    Output format");
     println!("    -v / -vv                   Verbose/trace mode");
 }

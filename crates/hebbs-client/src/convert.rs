@@ -44,14 +44,17 @@ pub fn proto_memory_to_domain(m: &pb::Memory) -> Result<Memory, String> {
 //  Remember
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn remember_options_to_proto(opts: &RememberOptions) -> pb::RememberRequest {
+pub fn remember_options_to_proto(
+    opts: &RememberOptions,
+    tenant_id: Option<&str>,
+) -> pb::RememberRequest {
     pb::RememberRequest {
         content: opts.content.clone(),
         importance: opts.importance,
         context: opts.context.as_ref().map(json_map_to_struct),
         entity_id: opts.entity_id.clone(),
         edges: opts.edges.iter().map(edge_to_proto).collect(),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -59,7 +62,10 @@ pub fn remember_options_to_proto(opts: &RememberOptions) -> pb::RememberRequest 
 //  Recall
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn recall_options_to_proto(opts: &RecallOptions) -> pb::RecallRequest {
+pub fn recall_options_to_proto(
+    opts: &RecallOptions,
+    tenant_id: Option<&str>,
+) -> pb::RecallRequest {
     let strategies = opts
         .strategies
         .iter()
@@ -72,7 +78,7 @@ pub fn recall_options_to_proto(opts: &RecallOptions) -> pb::RecallRequest {
         top_k: opts.top_k,
         scoring_weights: opts.scoring_weights.as_ref().map(scoring_weights_to_proto),
         cue_context: opts.cue_context.as_ref().map(json_map_to_struct),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -162,7 +168,10 @@ fn proto_strategy_detail_to_domain(
 //  Prime
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn prime_options_to_proto(opts: &PrimeOptions) -> pb::PrimeRequest {
+pub fn prime_options_to_proto(
+    opts: &PrimeOptions,
+    tenant_id: Option<&str>,
+) -> pb::PrimeRequest {
     pb::PrimeRequest {
         entity_id: opts.entity_id.clone(),
         context: opts.context.as_ref().map(json_map_to_struct),
@@ -170,7 +179,7 @@ pub fn prime_options_to_proto(opts: &PrimeOptions) -> pb::PrimeRequest {
         recency_window_us: opts.recency_window_us,
         similarity_cue: opts.similarity_cue.clone(),
         scoring_weights: opts.scoring_weights.as_ref().map(scoring_weights_to_proto),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -178,7 +187,10 @@ pub fn prime_options_to_proto(opts: &PrimeOptions) -> pb::PrimeRequest {
 //  Revise
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn revise_options_to_proto(opts: &ReviseOptions) -> pb::ReviseRequest {
+pub fn revise_options_to_proto(
+    opts: &ReviseOptions,
+    tenant_id: Option<&str>,
+) -> pb::ReviseRequest {
     let context_mode = match opts.context_mode {
         ContextMode::Merge => pb::ContextMode::Merge as i32,
         ContextMode::Replace => pb::ContextMode::Replace as i32,
@@ -192,7 +204,7 @@ pub fn revise_options_to_proto(opts: &ReviseOptions) -> pb::ReviseRequest {
         context_mode,
         entity_id: opts.entity_id.clone(),
         edges: opts.edges.iter().map(edge_to_proto).collect(),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -200,7 +212,10 @@ pub fn revise_options_to_proto(opts: &ReviseOptions) -> pb::ReviseRequest {
 //  Forget
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn forget_criteria_to_proto(c: &ForgetCriteria) -> pb::ForgetRequest {
+pub fn forget_criteria_to_proto(
+    c: &ForgetCriteria,
+    tenant_id: Option<&str>,
+) -> pb::ForgetRequest {
     pb::ForgetRequest {
         memory_ids: c.memory_ids.iter().map(|u| u.to_bytes().to_vec()).collect(),
         entity_id: c.entity_id.clone(),
@@ -208,7 +223,7 @@ pub fn forget_criteria_to_proto(c: &ForgetCriteria) -> pb::ForgetRequest {
         access_count_floor: c.access_count_floor,
         memory_kind: c.memory_kind.map(memory_kind_to_proto_i32),
         decay_score_floor: c.decay_score_floor,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -216,7 +231,10 @@ pub fn forget_criteria_to_proto(c: &ForgetCriteria) -> pb::ForgetRequest {
 //  Subscribe
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn subscribe_options_to_proto(opts: &SubscribeOptions) -> pb::SubscribeRequest {
+pub fn subscribe_options_to_proto(
+    opts: &SubscribeOptions,
+    tenant_id: Option<&str>,
+) -> pb::SubscribeRequest {
     pb::SubscribeRequest {
         entity_id: opts.entity_id.clone(),
         kind_filter: opts
@@ -228,7 +246,7 @@ pub fn subscribe_options_to_proto(opts: &SubscribeOptions) -> pb::SubscribeReque
         time_scope_us: opts.time_scope_us,
         output_buffer_size: opts.output_buffer_size,
         coarse_threshold: opts.coarse_threshold,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -250,7 +268,10 @@ pub fn proto_push_to_domain(p: &pb::SubscribePushMessage) -> Result<SubscribePus
 //  Reflect / Insights
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn reflect_scope_to_proto(scope: &crate::types::ReflectScope) -> pb::ReflectRequest {
+pub fn reflect_scope_to_proto(
+    scope: &crate::types::ReflectScope,
+    tenant_id: Option<&str>,
+) -> pb::ReflectRequest {
     let scope_msg = match scope {
         crate::types::ReflectScope::Entity {
             entity_id,
@@ -270,16 +291,19 @@ pub fn reflect_scope_to_proto(scope: &crate::types::ReflectScope) -> pb::Reflect
 
     pb::ReflectRequest {
         scope: Some(scope_msg),
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
-pub fn insights_filter_to_proto(f: &InsightsFilter) -> pb::GetInsightsRequest {
+pub fn insights_filter_to_proto(
+    f: &InsightsFilter,
+    tenant_id: Option<&str>,
+) -> pb::GetInsightsRequest {
     pb::GetInsightsRequest {
         entity_id: f.entity_id.clone(),
         min_confidence: f.min_confidence,
         max_results: f.max_results,
-        tenant_id: None,
+        tenant_id: tenant_id.map(str::to_string),
     }
 }
 
@@ -497,7 +521,7 @@ mod tests {
     #[test]
     fn remember_options_conversion() {
         let opts = RememberOptions::new("test content").importance(0.9);
-        let proto = remember_options_to_proto(&opts);
+        let proto = remember_options_to_proto(&opts, None);
         assert_eq!(proto.content, "test content");
         assert_eq!(proto.importance, Some(0.9));
     }
@@ -506,7 +530,7 @@ mod tests {
     fn forget_criteria_conversion() {
         let id = Ulid::new();
         let c = ForgetCriteria::by_id(id);
-        let proto = forget_criteria_to_proto(&c);
+        let proto = forget_criteria_to_proto(&c, None);
         assert_eq!(proto.memory_ids.len(), 1);
         assert_eq!(proto.memory_ids[0], id.to_bytes().to_vec());
     }
@@ -516,7 +540,7 @@ mod tests {
         let opts = SubscribeOptions::new()
             .entity_id("test")
             .confidence_threshold(0.7);
-        let proto = subscribe_options_to_proto(&opts);
+        let proto = subscribe_options_to_proto(&opts, None);
         assert_eq!(proto.entity_id, Some("test".to_string()));
         assert!((proto.confidence_threshold - 0.7).abs() < f32::EPSILON);
     }

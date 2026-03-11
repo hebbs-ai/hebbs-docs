@@ -6,6 +6,7 @@ use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use ulid::Generator;
 
+use hebbs_embed::normalize::cosine_similarity;
 use hebbs_embed::Embedder;
 use hebbs_index::{EdgeInput, EdgeType, HnswParams, IndexManager, TemporalOrder, TraversalEntry};
 use hebbs_storage::{BatchOperation, ColumnFamilyName, StorageBackend, TenantScopedStorage};
@@ -47,6 +48,17 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// we fetch `top_k * ENTITY_OVERSAMPLE` candidates, post-filter by
 /// entity, and truncate to the requested `top_k`.
 const ENTITY_OVERSAMPLE: usize = 4;
+
+/// Upper bound on entity memories scanned during prime's similarity
+/// phase.  The temporal index is queried with full time range to find
+/// all memory IDs for the entity, then their embeddings are loaded and
+/// ranked by cosine similarity with the cue.  This avoids the global
+/// HNSW + entity post-filter approach which fails when the entity is a
+/// small fraction of total memories.
+///
+/// Bounded per Principle 4 to cap the O(n * d) brute-force scan.
+const PRIME_ENTITY_SCAN_LIMIT: usize = 500;
+
 
 /// Input for the `remember()` operation.
 ///
@@ -110,6 +122,8 @@ pub struct Engine {
     subscribe_registry: Arc<SubscriptionRegistry>,
     /// Phase 7: reflection pipeline handle (optional, started via `start_reflect()`).
     reflect_handle: Mutex<Option<ReflectHandle>>,
+    /// Session store for agent-driven two-step reflect (prepare/commit).
+    reflect_session_store: Arc<reflect::ReflectSessionStore>,
     /// Maximum predecessor snapshots retained per memory during revisions.
     /// When exceeded, the oldest snapshots are pruned atomically.
     max_snapshots_per_memory: u32,
@@ -140,6 +154,7 @@ impl Engine {
             decay_handle: Mutex::new(None),
             subscribe_registry: Arc::new(SubscriptionRegistry::new(100)),
             reflect_handle: Mutex::new(None),
+            reflect_session_store: Arc::new(reflect::ReflectSessionStore::new()),
             max_snapshots_per_memory: DEFAULT_MAX_SNAPSHOTS_PER_MEMORY,
         };
         engine.init_schema()?;
@@ -168,6 +183,7 @@ impl Engine {
             decay_handle: Mutex::new(None),
             subscribe_registry: Arc::new(SubscriptionRegistry::new(100)),
             reflect_handle: Mutex::new(None),
+            reflect_session_store: Arc::new(reflect::ReflectSessionStore::new()),
             max_snapshots_per_memory: DEFAULT_MAX_SNAPSHOTS_PER_MEMORY,
         };
         engine.init_schema()?;
@@ -887,32 +903,47 @@ impl Engine {
         let mut similarity_memories: Vec<(Memory, f32)> = Vec::new();
 
         if !similarity_cue.is_empty() {
-            let fetch_limit = similarity_limit
-                .saturating_mul(ENTITY_OVERSAMPLE)
-                .max(similarity_limit);
-            if let Ok(cue_embedding) = self.embedder.embed(&similarity_cue) {
-                if let Ok(search_results) =
-                    self.index_manager
-                        .search_vector(&cue_embedding, fetch_limit, None)
-                {
-                    for (memory_id, distance) in &search_results {
-                        match Self::get_from_storage(&*storage, memory_id) {
-                            Ok(mem) => {
-                                if mem.entity_id.as_deref() != Some(&input.entity_id) {
-                                    continue;
-                                }
-                                let relevance = (1.0 - distance).max(0.0);
-                                similarity_memories.push((mem, relevance));
-                                if similarity_memories.len() >= similarity_limit {
-                                    break;
-                                }
-                            }
-                            Err(HebbsError::MemoryNotFound { .. }) => continue,
-                            Err(e) => return Err(e),
+            let cue_embedding = self.embedder.embed(&similarity_cue)?;
+
+            // Entity-scoped similarity: query the temporal index for ALL
+            // entity memory IDs (full time range), load their embeddings,
+            // and rank by cosine similarity with the cue.  This avoids the
+            // global HNSW + entity post-filter which returns 0 results
+            // when the entity is a small fraction of total memories.
+            let entity_ids = self.index_manager.query_temporal(
+                &input.entity_id,
+                0,
+                now_us,
+                TemporalOrder::ReverseChronological,
+                PRIME_ENTITY_SCAN_LIMIT,
+            )?;
+
+            // Score each entity memory by cosine similarity with the cue.
+            // O(n * d) where n ≤ PRIME_ENTITY_SCAN_LIMIT, d = embedding dim.
+            let mut scored: Vec<(Memory, f32)> =
+                Vec::with_capacity(entity_ids.len().min(similarity_limit));
+
+            for (memory_id, _timestamp) in &entity_ids {
+                match Self::get_from_storage(&*storage, memory_id) {
+                    Ok(mem) => {
+                        if let Some(ref emb) = mem.embedding {
+                            let relevance =
+                                cosine_similarity(&cue_embedding, emb).max(0.0);
+                            scored.push((mem, relevance));
                         }
                     }
+                    Err(HebbsError::MemoryNotFound { .. }) => continue,
+                    Err(e) => return Err(e),
                 }
             }
+
+            // Sort by relevance descending, take top similarity_limit.
+            scored.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scored.truncate(similarity_limit);
+            similarity_memories = scored;
         }
 
         let mut seen = HashSet::new();
@@ -1689,6 +1720,48 @@ impl Engine {
     ) -> Result<Vec<Memory>> {
         let storage = self.scoped_storage(tenant);
         reflect::query_insights(&storage, &filter)
+    }
+
+    /// Prepare reflection data for agent-driven two-step reflect.
+    ///
+    /// Gathers memories, clusters them, and builds LLM prompts without
+    /// calling any LLM. Returns cluster data, prompts, and a session ID
+    /// that must be passed to [`reflect_commit_for_tenant`](Self::reflect_commit_for_tenant).
+    pub fn reflect_prepare_for_tenant(
+        &self,
+        tenant: &TenantContext,
+        scope: ReflectScope,
+        config: &ReflectConfig,
+    ) -> Result<reflect::ReflectPrepareResult> {
+        let storage = self.scoped_storage(tenant);
+        reflect::reflect_prepare_shared(
+            &storage,
+            &self.embedder,
+            config,
+            &scope,
+            &self.reflect_session_store,
+        )
+    }
+
+    /// Commit agent-produced insights from a previous `reflect_prepare` call.
+    ///
+    /// Validates the session and source memory IDs, then embeds, indexes,
+    /// and stores each insight. No LLM is called.
+    pub fn reflect_commit_for_tenant(
+        &self,
+        _tenant: &TenantContext,
+        session_id: &str,
+        insights: Vec<hebbs_reflect::ProducedInsight>,
+    ) -> Result<reflect::ReflectCommitResult> {
+        reflect::reflect_commit_shared(
+            &self.storage,
+            &self.embedder,
+            &self.index_manager,
+            &self.subscribe_registry,
+            &self.reflect_session_store,
+            session_id,
+            insights,
+        )
     }
 
     /// Start the background reflect monitor with the given configuration.

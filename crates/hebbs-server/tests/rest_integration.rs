@@ -5,9 +5,11 @@ use axum::body::Body;
 use axum::http::{self, Request, StatusCode};
 use tower::ServiceExt;
 
-use hebbs_core::engine::Engine;
+use hebbs_core::engine::{Engine, RememberInput};
+use hebbs_core::reflect::{InsightsFilter, ReflectConfig, ReflectScope};
 use hebbs_embed::MockEmbedder;
-use hebbs_index::HnswParams;
+use hebbs_index::{EdgeType, HnswParams};
+use hebbs_reflect::MockLlmProvider;
 use hebbs_server::metrics::HebbsMetrics;
 use hebbs_server::rest::{self, AppState};
 use hebbs_storage::InMemoryBackend;
@@ -505,4 +507,122 @@ async fn rest_full_lifecycle() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Insight Lineage
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Verify that `/v1/insights` returns `source_memory_ids` for each insight.
+#[tokio::test]
+async fn rest_insights_include_source_memory_ids() {
+    let engine = test_engine();
+
+    // Populate enough memories to trigger clustering (30 memories, min_cluster_size=2)
+    for i in 0..30 {
+        engine
+            .remember(RememberInput {
+                content: format!(
+                    "Customer lineage-test mentioned topic {} during call {} with detail {}",
+                    i % 5,
+                    i,
+                    i * 7
+                ),
+                importance: Some(0.5 + (i % 10) as f32 * 0.05),
+                context: None,
+                entity_id: Some("lineage-entity".into()),
+                edges: vec![],
+            })
+            .unwrap();
+    }
+
+    // Run reflect to produce insights with InsightFrom edges
+    let mock = MockLlmProvider::new();
+    let config = ReflectConfig::default();
+    let output = engine
+        .reflect(
+            ReflectScope::Global { since_us: None },
+            &config,
+            &mock,
+            &mock,
+        )
+        .unwrap();
+    assert!(output.insights_created > 0, "reflect must produce insights");
+
+    // Verify edges exist at engine level (sanity check)
+    let insights = engine.insights(InsightsFilter::default()).unwrap();
+    assert!(!insights.is_empty());
+    let mut engine_lineage_count = 0;
+    for insight in &insights {
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&insight.memory_id);
+        let edges = engine.outgoing_edges(&id).unwrap_or_default();
+        let insight_from: Vec<_> = edges
+            .iter()
+            .filter(|(et, _, _)| *et == EdgeType::InsightFrom)
+            .collect();
+        engine_lineage_count += insight_from.len();
+    }
+    assert!(
+        engine_lineage_count > 0,
+        "insights must have InsightFrom edges at the engine level"
+    );
+
+    // Now test the REST API returns source_memory_ids
+    let app = test_app(engine);
+    let req = Request::builder()
+        .uri("/v1/insights")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_to_json(resp.into_body()).await;
+    let insights_json = json.as_array().unwrap();
+    assert!(!insights_json.is_empty(), "REST insights must not be empty");
+
+    let mut total_source_ids = 0;
+    for insight in insights_json {
+        assert_eq!(insight["kind"], "insight");
+        let source_ids = insight["source_memory_ids"]
+            .as_array()
+            .expect("source_memory_ids must be a JSON array");
+        total_source_ids += source_ids.len();
+        for sid in source_ids {
+            let hex = sid.as_str().expect("source_memory_id must be a hex string");
+            assert_eq!(hex.len(), 32, "source_memory_id must be 32-char hex");
+        }
+    }
+
+    assert!(
+        total_source_ids > 0,
+        "REST /v1/insights must include source_memory_ids for lineage (Principle 6)"
+    );
+}
+
+/// Verify that episode memories returned via REST do not include source_memory_ids.
+#[tokio::test]
+async fn rest_episodes_omit_source_memory_ids() {
+    let engine = test_engine();
+    let app = test_app(engine);
+
+    // Remember an episode
+    let req = Request::builder()
+        .method(http::Method::POST)
+        .uri("/v1/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content": "plain episode memory"}"#))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    let json = body_to_json(resp.into_body()).await;
+    assert_eq!(json["kind"], "episode");
+    // source_memory_ids should be absent (skip_serializing_if = "Vec::is_empty")
+    assert!(
+        json.get("source_memory_ids").is_none(),
+        "episode memories must not include source_memory_ids field"
+    );
 }

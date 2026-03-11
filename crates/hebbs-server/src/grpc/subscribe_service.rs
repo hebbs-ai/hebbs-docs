@@ -56,26 +56,35 @@ impl SubscribeService for SubscribeServiceImpl {
         &self,
         request: Request<pb::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_READ)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "subscribe")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "subscribe")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
+
+        let explicit_kinds: Vec<MemoryKind> = req
+            .kind_filter
+            .iter()
+            .filter_map(|k| match pb::MemoryKind::try_from(*k) {
+                Ok(pb::MemoryKind::Episode) => Some(MemoryKind::Episode),
+                Ok(pb::MemoryKind::Insight) => Some(MemoryKind::Insight),
+                Ok(pb::MemoryKind::Revision) => Some(MemoryKind::Revision),
+                _ => None,
+            })
+            .collect();
+
+        let defaults = SubscribeConfig::default();
 
         let config = SubscribeConfig {
             entity_id: req.entity_id,
-            memory_kinds: req
-                .kind_filter
-                .iter()
-                .filter_map(|k| match pb::MemoryKind::try_from(*k) {
-                    Ok(pb::MemoryKind::Episode) => Some(MemoryKind::Episode),
-                    Ok(pb::MemoryKind::Insight) => Some(MemoryKind::Insight),
-                    Ok(pb::MemoryKind::Revision) => Some(MemoryKind::Revision),
-                    _ => None,
-                })
-                .collect(),
+            memory_kinds: if explicit_kinds.is_empty() {
+                defaults.memory_kinds
+            } else {
+                explicit_kinds
+            },
             confidence_threshold: req.confidence_threshold,
             time_scope_us: req.time_scope_us,
-            ..SubscribeConfig::default()
+            ..defaults
         };
 
         let engine = self.engine.clone();
@@ -160,10 +169,11 @@ impl SubscribeService for SubscribeServiceImpl {
         &self,
         request: Request<pb::FeedRequest>,
     ) -> Result<Response<pb::FeedResponse>, Status> {
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_READ)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "feed")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "feed")?;
         let req = request.into_inner();
+        let _tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let subs = self.subscriptions.lock();
         let entry = subs.get(&req.subscription_id).ok_or_else(|| {
@@ -180,9 +190,10 @@ impl SubscribeService for SubscribeServiceImpl {
         &self,
         request: Request<pb::CloseSubscriptionRequest>,
     ) -> Result<Response<pb::CloseSubscriptionResponse>, Status> {
-        let _tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_READ)?;
         let req = request.into_inner();
+        let _tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let mut subs = self.subscriptions.lock();
         if let Some(mut entry) = subs.remove(&req.subscription_id) {

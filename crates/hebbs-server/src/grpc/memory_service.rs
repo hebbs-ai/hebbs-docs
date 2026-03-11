@@ -26,10 +26,11 @@ impl MemoryService for MemoryServiceImpl {
         request: Request<pb::RememberRequest>,
     ) -> Result<Response<pb::RememberResponse>, Status> {
         let start = std::time::Instant::now();
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_WRITE)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "remember")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "remember")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let input = convert::proto_to_remember_input(req).map_err(Status::invalid_argument)?;
 
@@ -63,10 +64,11 @@ impl MemoryService for MemoryServiceImpl {
         request: Request<pb::GetRequest>,
     ) -> Result<Response<pb::GetResponse>, Status> {
         let start = std::time::Instant::now();
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_READ)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "get")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "get")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         if req.memory_id.len() != 16 {
             return Err(Status::invalid_argument(format!(
@@ -104,14 +106,16 @@ impl MemoryService for MemoryServiceImpl {
         request: Request<pb::RecallRequest>,
     ) -> Result<Response<pb::RecallResponse>, Status> {
         let start = std::time::Instant::now();
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_READ)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "recall")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "recall")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let input = convert::proto_to_recall_input(req).map_err(Status::invalid_argument)?;
 
         let engine = self.engine.clone();
+        let tenant_clone = tenant.clone();
         let result = tokio::task::spawn_blocking(move || engine.recall_for_tenant(&tenant, input))
             .await
             .map_err(|e| Status::internal(format!("task join error: {}", e)))?;
@@ -121,10 +125,16 @@ impl MemoryService for MemoryServiceImpl {
                 let elapsed = start.elapsed().as_secs_f64();
                 self.metrics.observe_operation("recall", "ok", elapsed);
 
+                let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
+                let lineage = convert::resolve_lineage_batch_refs(
+                    &self.engine,
+                    &tenant_clone,
+                    &memories_ref,
+                );
                 let results: Vec<pb::RecallResult> = output
                     .results
                     .iter()
-                    .map(convert::recall_result_to_proto)
+                    .map(|r| convert::recall_result_to_proto_with_lineage(r, &lineage))
                     .collect();
 
                 let strategy_errors: Vec<pb::StrategyErrorMessage> = output
@@ -156,14 +166,16 @@ impl MemoryService for MemoryServiceImpl {
         request: Request<pb::PrimeRequest>,
     ) -> Result<Response<pb::PrimeResponse>, Status> {
         let start = std::time::Instant::now();
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_READ)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "prime")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "prime")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let input = convert::proto_to_prime_input(req).map_err(Status::invalid_argument)?;
 
         let engine = self.engine.clone();
+        let tenant_clone = tenant.clone();
         let result = tokio::task::spawn_blocking(move || engine.prime_for_tenant(&tenant, input))
             .await
             .map_err(|e| Status::internal(format!("task join error: {}", e)))?;
@@ -173,10 +185,16 @@ impl MemoryService for MemoryServiceImpl {
                 let elapsed = start.elapsed().as_secs_f64();
                 self.metrics.observe_operation("prime", "ok", elapsed);
 
+                let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
+                let lineage = convert::resolve_lineage_batch_refs(
+                    &self.engine,
+                    &tenant_clone,
+                    &memories_ref,
+                );
                 let results: Vec<pb::RecallResult> = output
                     .results
                     .iter()
-                    .map(convert::recall_result_to_proto)
+                    .map(|r| convert::recall_result_to_proto_with_lineage(r, &lineage))
                     .collect();
 
                 Ok(Response::new(pb::PrimeResponse {
@@ -200,10 +218,11 @@ impl MemoryService for MemoryServiceImpl {
         request: Request<pb::ReviseRequest>,
     ) -> Result<Response<pb::ReviseResponse>, Status> {
         let start = std::time::Instant::now();
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_WRITE)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "revise")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "revise")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let input = convert::proto_to_revise_input(req).map_err(Status::invalid_argument)?;
 
@@ -235,10 +254,11 @@ impl MemoryService for MemoryServiceImpl {
         request: Request<pb::ForgetRequest>,
     ) -> Result<Response<pb::ForgetResponse>, Status> {
         let start = std::time::Instant::now();
-        let tenant = middleware::extract_tenant_from_request(&request);
+        let auth_tenant = middleware::extract_tenant_from_request(&request);
         middleware::check_permission(&request, PERM_WRITE)?;
-        middleware::check_rate_limit(&self.auth_state, &tenant, "forget")?;
+        middleware::check_rate_limit(&self.auth_state, &auth_tenant, "forget")?;
         let req = request.into_inner();
+        let tenant = middleware::resolve_tenant(auth_tenant, req.tenant_id.as_deref())?;
 
         let criteria = convert::proto_to_forget_criteria(req).map_err(Status::invalid_argument)?;
 

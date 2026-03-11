@@ -9,7 +9,7 @@ use tracing::warn;
 
 use hebbs_core::auth::{KeyCache, KeyRecord};
 use hebbs_core::rate_limit::RateLimiter;
-use hebbs_core::tenant::TenantContext;
+use hebbs_core::tenant::{TenantContext, DEFAULT_TENANT_ID};
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Shared auth state for middleware
@@ -83,6 +83,25 @@ pub fn extract_tenant_from_request<T>(request: &tonic::Request<T>) -> TenantCont
         .get::<TenantContext>()
         .cloned()
         .unwrap_or_default()
+}
+
+/// Resolve the effective tenant for a gRPC request. When auth provided a
+/// non-default tenant (API key binding), that tenant always wins. Otherwise,
+/// if the request proto carries an explicit `tenant_id` field, use it.
+/// This allows clients to specify a tenant when auth is disabled.
+#[allow(clippy::result_large_err)]
+pub fn resolve_tenant(
+    auth_tenant: TenantContext,
+    request_tenant_id: Option<&str>,
+) -> Result<TenantContext, Status> {
+    if auth_tenant.tenant_id() != DEFAULT_TENANT_ID {
+        return Ok(auth_tenant);
+    }
+    match request_tenant_id {
+        Some(tid) if !tid.is_empty() => TenantContext::new(tid)
+            .map_err(|e| Status::invalid_argument(format!("invalid tenant_id: {}", e))),
+        _ => Ok(auth_tenant),
+    }
 }
 
 /// Verify that the authenticated key carries the required permission bits.

@@ -52,6 +52,7 @@ pub struct HebbsClient {
     timeout: Duration,
     retry_policy: RetryPolicy,
     api_key: Option<String>,
+    tenant_id: Option<String>,
 }
 
 impl fmt::Debug for HebbsClient {
@@ -61,6 +62,7 @@ impl fmt::Debug for HebbsClient {
             .field("timeout", &self.timeout)
             .field("retry_policy", &self.retry_policy)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("tenant_id", &self.tenant_id)
             .finish()
     }
 }
@@ -75,6 +77,7 @@ pub struct ClientBuilder {
     connect_lazy: bool,
     user_agent: String,
     api_key: Option<String>,
+    tenant_id: Option<String>,
 }
 
 impl Default for ClientBuilder {
@@ -88,6 +91,7 @@ impl Default for ClientBuilder {
             connect_lazy: true,
             user_agent: format!("hebbs-client-rust/{}", env!("CARGO_PKG_VERSION")),
             api_key: None,
+            tenant_id: None,
         }
     }
 }
@@ -130,6 +134,16 @@ impl ClientBuilder {
 
     pub fn api_key(mut self, key: impl Into<String>) -> Self {
         self.api_key = Some(key.into());
+        self
+    }
+
+    /// Explicit tenant ID for multi-tenant deployments.
+    ///
+    /// Normally derived from the API key by the server. Set this only
+    /// when the server is running without authentication or when you
+    /// need to override the key-derived tenant.
+    pub fn tenant_id(mut self, id: impl Into<String>) -> Self {
+        self.tenant_id = Some(id.into());
         self
     }
 
@@ -200,6 +214,7 @@ impl ClientBuilder {
             timeout: self.timeout,
             retry_policy: self.retry_policy,
             api_key: self.api_key,
+            tenant_id: self.tenant_id,
         })
     }
 }
@@ -231,7 +246,7 @@ impl HebbsClient {
     /// Store a new memory with full options.
     #[instrument(skip_all, fields(operation = "remember", endpoint = %self.endpoint))]
     pub async fn remember_with(&self, opts: RememberOptions) -> crate::Result<Memory> {
-        let req = convert::remember_options_to_proto(&opts);
+        let req = convert::remember_options_to_proto(&opts, self.tenant_id.as_deref());
         let resp = self
             .unary_call("remember", |mut c| {
                 let r = req.clone();
@@ -255,7 +270,7 @@ impl HebbsClient {
     pub async fn get(&self, memory_id: Ulid) -> crate::Result<Memory> {
         let req = pb::GetRequest {
             memory_id: memory_id.to_bytes().to_vec(),
-            tenant_id: None,
+            tenant_id: self.tenant_id.clone(),
         };
         let resp = self
             .retryable_call("get", |mut c| {
@@ -285,7 +300,7 @@ impl HebbsClient {
     /// Recall memories with full options.
     #[instrument(skip_all, fields(operation = "recall", endpoint = %self.endpoint))]
     pub async fn recall_with(&self, opts: RecallOptions) -> crate::Result<RecallOutput> {
-        let req = convert::recall_options_to_proto(&opts);
+        let req = convert::recall_options_to_proto(&opts, self.tenant_id.as_deref());
         let resp = self
             .retryable_call("recall", |mut c| {
                 let r = req.clone();
@@ -330,7 +345,7 @@ impl HebbsClient {
     /// Pre-load with full options.
     #[instrument(skip_all, fields(operation = "prime", endpoint = %self.endpoint))]
     pub async fn prime_with(&self, opts: PrimeOptions) -> crate::Result<PrimeOutput> {
-        let req = convert::prime_options_to_proto(&opts);
+        let req = convert::prime_options_to_proto(&opts, self.tenant_id.as_deref());
         let resp = self
             .retryable_call("prime", |mut c| {
                 let r = req.clone();
@@ -357,7 +372,7 @@ impl HebbsClient {
     /// Revise an existing memory.
     #[instrument(skip_all, fields(operation = "revise", endpoint = %self.endpoint))]
     pub async fn revise(&self, opts: ReviseOptions) -> crate::Result<Memory> {
-        let req = convert::revise_options_to_proto(&opts);
+        let req = convert::revise_options_to_proto(&opts, self.tenant_id.as_deref());
         let resp = self
             .unary_call("revise", |mut c| {
                 let r = req.clone();
@@ -386,7 +401,7 @@ impl HebbsClient {
     /// Forget memories matching criteria.
     #[instrument(skip_all, fields(operation = "forget", endpoint = %self.endpoint))]
     pub async fn forget_with(&self, criteria: ForgetCriteria) -> crate::Result<ForgetOutput> {
-        let req = convert::forget_criteria_to_proto(&criteria);
+        let req = convert::forget_criteria_to_proto(&criteria, self.tenant_id.as_deref());
         let resp = self
             .unary_call("forget", |mut c| {
                 let r = req.clone();
@@ -407,7 +422,7 @@ impl HebbsClient {
     /// Start a subscription that streams relevant memories.
     #[instrument(skip_all, fields(operation = "subscribe", endpoint = %self.endpoint))]
     pub async fn subscribe(&self, opts: SubscribeOptions) -> crate::Result<SubscribeHandle> {
-        let req = convert::subscribe_options_to_proto(&opts);
+        let req = convert::subscribe_options_to_proto(&opts, self.tenant_id.as_deref());
 
         let mut client = self.subscribe_svc.clone();
         let response = client
@@ -434,6 +449,7 @@ impl HebbsClient {
             stream: Box::pin(mapped_stream),
             subscribe_client: client,
             subscription_id,
+            tenant_id: self.tenant_id.clone(),
         })
     }
 
@@ -442,7 +458,7 @@ impl HebbsClient {
     /// Trigger reflection over a scope.
     #[instrument(skip_all, fields(operation = "reflect", endpoint = %self.endpoint))]
     pub async fn reflect(&self, scope: crate::types::ReflectScope) -> crate::Result<ReflectOutput> {
-        let req = convert::reflect_scope_to_proto(&scope);
+        let req = convert::reflect_scope_to_proto(&scope, self.tenant_id.as_deref());
         let mut client = self.reflect.clone();
         let resp = tokio::time::timeout(self.timeout, client.reflect(req))
             .await
@@ -466,7 +482,7 @@ impl HebbsClient {
     /// Query stored insights.
     #[instrument(skip_all, fields(operation = "insights", endpoint = %self.endpoint))]
     pub async fn insights(&self, filter: InsightsFilter) -> crate::Result<Vec<Memory>> {
-        let req = convert::insights_filter_to_proto(&filter);
+        let req = convert::insights_filter_to_proto(&filter, self.tenant_id.as_deref());
         let mut client = self.reflect.clone();
         let resp = tokio::time::timeout(self.timeout, client.get_insights(req))
             .await
@@ -614,6 +630,7 @@ pub struct SubscribeHandle {
     stream: std::pin::Pin<Box<dyn Stream<Item = crate::Result<SubscribePush>> + Send>>,
     subscribe_client: SubscribeServiceClient<AuthChannel>,
     subscription_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    tenant_id: Option<String>,
 }
 
 impl SubscribeHandle {
@@ -630,7 +647,7 @@ impl SubscribeHandle {
         let req = pb::FeedRequest {
             subscription_id: sub_id,
             text: text.into(),
-            tenant_id: None,
+            tenant_id: self.tenant_id.clone(),
         };
         self.subscribe_client
             .feed(req)
@@ -646,7 +663,7 @@ impl SubscribeHandle {
             .load(std::sync::atomic::Ordering::Relaxed);
         let req = pb::CloseSubscriptionRequest {
             subscription_id: sub_id,
-            tenant_id: None,
+            tenant_id: self.tenant_id.clone(),
         };
         let _ = self.subscribe_client.close_subscription(req).await;
         Ok(())
