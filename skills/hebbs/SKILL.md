@@ -53,7 +53,7 @@ hebbs-cli recall "test" --format json 2>&1
 If you see a connection error, start the server in the background:
 
 ```
-HEBBS_AUTH_ENABLED=false nohup hebbs-server --data-dir ~/.hebbs/data > /tmp/hebbs-server.log 2>&1 &
+HEBBS_AUTH_ENABLED=false nohup hebbs-server start --data-dir ~/.hebbs/data > /tmp/hebbs-server.log 2>&1 &
 ```
 
 Wait 15 seconds for the ONNX embedder to initialize, then retry. Do not proceed until the server responds.
@@ -75,13 +75,13 @@ curl -sSf https://hebbs.ai/install | sh
 The server must be running before using any `hebbs-cli` command. Start it with auth disabled:
 
 ```
-HEBBS_AUTH_ENABLED=false hebbs-server --data-dir ~/.hebbs/data
+HEBBS_AUTH_ENABLED=false hebbs-server start --data-dir ~/.hebbs/data
 ```
 
 To run in the background:
 
 ```
-HEBBS_AUTH_ENABLED=false nohup hebbs-server --data-dir ~/.hebbs/data > /tmp/hebbs-server.log 2>&1 &
+HEBBS_AUTH_ENABLED=false nohup hebbs-server start --data-dir ~/.hebbs/data > /tmp/hebbs-server.log 2>&1 &
 ```
 
 This starts the gRPC server on port 6380 and HTTP on port 6381. Data is stored in `~/.hebbs/data`.
@@ -111,7 +111,7 @@ Flags:
 - `--importance <0.0-1.0>` — how important this memory is (default 0.5). Use 0.8+ for user preferences, decisions, corrections. Use 0.3 for transient observations.
 - `--entity-id <id>` — group memories by entity (e.g. `user_prefs`, `project_alpha`, a person's name). Omit for global context.
 - `--context <json>` — arbitrary metadata as JSON object (e.g. `'{"source":"email","topic":"billing"}'`).
-- `--edge <TARGET_ID:EDGE_TYPE[:CONFIDENCE]>` — link to another memory (repeatable). Types: `caused_by`, `related_to`, `followed_by`, `revised_from`, `insight_from`. Use to build causal chains and lineage.
+- `--edge <TARGET_ID:EDGE_TYPE[:CONFIDENCE]>` — link to another memory (repeatable). Types: `caused_by`, `related_to`, `followed_by`, `revised_from`, `insight_from`. Use to build causal chains and lineage. **Shell quoting:** use `"${MEM_ID}:edge_type"` — bare `$MEM_ID:edge_type` triggers zsh variable modifier expansion.
 
 ### Recall — retrieve relevant memories
 
@@ -184,8 +184,10 @@ hebbs-cli reflect-commit --session-id <id> --insights '[{"content":"Users consis
 Each insight needs:
 - `content` — the consolidated insight text
 - `confidence` — 0.0 to 1.0
-- `source_memory_ids` — hex-encoded IDs from the cluster (must be from the prepare output)
+- `source_memory_ids` — hex-encoded IDs. **Use the `memory_ids` array from the cluster**, not `memories[].memory_id` (which is a ULID and will be rejected).
 - `tags` — categorical labels
+
+Reflection requires at least 5 memories for an entity to produce clusters. If `clusters` is empty, accumulate more memories before retrying.
 
 Sessions expire after 10 minutes.
 

@@ -21,6 +21,7 @@ fn make_test_memory() -> pb::Memory {
         kind: 1, // Episode
         device_id: None,
         logical_clock: 42,
+        source_memory_ids: Vec::new(),
     }
 }
 
@@ -42,6 +43,7 @@ fn make_test_recall_results(count: usize) -> Vec<pb::RecallResult> {
                 kind: 1,
                 device_id: None,
                 logical_clock: 0,
+                source_memory_ids: Vec::new(),
             }),
             score: 1.0 - (i as f32 * 0.1),
             strategy_details: Vec::new(),

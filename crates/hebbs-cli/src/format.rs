@@ -404,6 +404,24 @@ impl Renderer {
         writeln!(w, "{}", s)
     }
 
+    /// Render a list of memories. JSON format outputs a JSON array.
+    pub fn render_memories(&self, memories: &[pb::Memory], w: &mut dyn Write) -> std::io::Result<()> {
+        match self.format {
+            OutputFormat::Json => {
+                let json_values: Vec<MemoryJson> =
+                    memories.iter().map(proto_memory_to_json).collect();
+                let s = serde_json::to_string(&json_values).unwrap_or_default();
+                writeln!(w, "{}", s)
+            }
+            _ => {
+                for m in memories {
+                    self.render_memory(m, w)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     pub fn render_memory_detail(&self, m: &pb::Memory, w: &mut dyn Write) -> std::io::Result<()> {
         match self.format {
             OutputFormat::Human => self.render_memory_detail_human(m, w),

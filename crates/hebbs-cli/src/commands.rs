@@ -947,13 +947,11 @@ async fn execute_insights(
     if inner.insights.is_empty() {
         writeln!(w, "No insights found.").ok();
     } else {
-        for m in &inner.insights {
-            renderer
-                .render_memory(m, w)
-                .map_err(|e| CliError::Internal {
-                    message: e.to_string(),
-                })?;
-        }
+        renderer
+            .render_memories(&inner.insights, w)
+            .map_err(|e| CliError::Internal {
+                message: e.to_string(),
+            })?;
     }
 
     Ok(())
