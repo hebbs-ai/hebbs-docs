@@ -41,6 +41,9 @@ REST uses three endpoints to approximate the bidirectional gRPC flow:
 | `kind_filter` | array | No | Memory kinds to include: `"episode"`, `"insight"`, `"revision"`. |
 | `confidence_threshold` | float | No | Minimum relevance to push (default 0.5). |
 | `time_scope_us` | int | No | Only consider memories within this time window (microseconds). |
+| `tenant_id` | string | No | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. Default: derived from API key or `"default"`. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Confidence Threshold
 

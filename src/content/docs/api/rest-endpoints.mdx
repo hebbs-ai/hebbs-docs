@@ -38,6 +38,12 @@ To disable auth for local development, start the server with `HEBBS_AUTH_ENABLED
 | GET | `/v1/health/ready` | Readiness probe | — | `{"status": "ready"}` |
 | GET | `/v1/metrics` | Prometheus metrics | — | Text exposition format |
 
+## Tenant Isolation
+
+REST endpoints derive the tenant from the `Authorization` header. The auth middleware resolves the API key to a tenant and scopes all operations to that tenant's data. There is no `tenant_id` field in REST request bodies — tenant context comes exclusively from the auth layer.
+
+When auth is disabled (`HEBBS_AUTH_ENABLED=false`), all REST requests operate on the default tenant.
+
 :::note
 **Recall defaults:** Only `cue` and `strategies` are required. All other fields (`top_k`, `ef_search`, `time_range`, `seed_memory_id`, `max_depth`, `edge_types`, `analogical_alpha`, `cue_context`, `scoring_weights`) use smart defaults. See [recall](/api/recall/#request-fields) for the full default table.
 :::
@@ -157,6 +163,96 @@ Close the subscription:
 curl -s -X DELETE http://localhost:6381/v1/subscribe/1 \
   -H "Authorization: Bearer $HEBBS_API_KEY"
 ```
+
+### Reflect Prepare (agent-driven)
+
+Prepare reflection data without calling any LLM. Returns clustered memories and prompts for agent-driven insight generation.
+
+```bash
+curl -s -X POST http://localhost:6381/v1/reflect/prepare \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{"entity_id": "customer-42"}' | jq .
+```
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entity_id` | string | No | Entity scope (omit for global) |
+| `since_us` | integer | No | Only include memories since this timestamp (microseconds) |
+
+**Response:**
+
+```json
+{
+  "session_id": "01JQXYZ...",
+  "memories_processed": 47,
+  "clusters": [
+    {
+      "cluster_id": 0,
+      "member_count": 8,
+      "proposal_system_prompt": "...",
+      "proposal_user_prompt": "...",
+      "memory_ids": ["aabb1122...", "ccdd3344..."],
+      "validation_context": { ... },
+      "memories": [
+        {
+          "memory_id": "aabb1122...",
+          "content": "The user prefers dark mode in all applications",
+          "importance": 0.8,
+          "entity_id": "user_prefs",
+          "created_at": 1720000000000000
+        }
+      ]
+    }
+  ],
+  "existing_insight_count": 3
+}
+```
+
+### Reflect Commit (agent-driven)
+
+Commit agent-produced insights from a previous `reflect/prepare` call.
+
+```bash
+curl -s -X POST http://localhost:6381/v1/reflect/commit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HEBBS_API_KEY" \
+  -d '{
+    "session_id": "01JQXYZ...",
+    "insights": [
+      {
+        "content": "Customer consistently prefers dark mode across all applications",
+        "confidence": 0.9,
+        "source_memory_ids": ["aabb1122...", "ccdd3344..."],
+        "tags": ["preference", "ui"]
+      }
+    ]
+  }' | jq .
+```
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `session_id` | string | Yes | Session ID from `reflect/prepare` |
+| `insights` | array | Yes | Array of insight objects |
+| `insights[].content` | string | Yes | Insight text |
+| `insights[].confidence` | float | Yes | Confidence score (0.0–1.0) |
+| `insights[].source_memory_ids` | string[] | Yes | Hex-encoded memory IDs from the cluster |
+| `insights[].tags` | string[] | No | Categorical labels |
+| `insights[].cluster_id` | integer | No | Cluster ID from prepare output |
+
+**Response:**
+
+```json
+{
+  "insights_created": 1
+}
+```
+
+Sessions expire after 10 minutes. Source memory IDs must be from the original prepare output.
 
 ## Notes
 

@@ -1,32 +1,30 @@
 ---
 title: Introduction
-description: "HEBBS is a single-binary cognitive memory engine for AI agents -- algorithms, not LLM wrappers."
+description: "HEBBS is the cognitive memory engine for AI agents - four recall strategies, native consolidation, automatic decay, one binary."
 ---
 
-HEBBS is a cognitive memory engine for AI agents. It ships as a single Rust binary with embedded storage, local ONNX embeddings, and sub-10ms p99 recall at millions of memories. No external databases. No LLM calls on the hot path. One process, one data directory, one API.
+HEBBS is a cognitive memory engine for AI agents. It gives agents temporal reasoning, causal chains, analogical transfer, consolidation, and decay as a single primitive - capabilities that didn't exist in any single system before. It ships as one Rust binary with embedded storage, local ONNX embeddings, and sub-10ms p99 recall at millions of memories.
 
 ## The Real Problem
 
-Every memory solution in the market draws from the same well: Python glue, an external vector database, and LLM calls in the operational path. They may add entity extraction, temporal awareness, importance scoring, or graph relationships -- but the underlying architecture is the same, and it imposes a hard ceiling:
+Before HEBBS, "agent memory" meant similarity search. Every solution in the market shares the same architecture: embed a question, query a vector database, return the nearest chunks, hope the answer is in there. Some add LLM-based extraction, graph relationships, or temporal metadata on top - but the retrieval model is the same, and it has hard limits:
 
-- **Latency floor.** A network hop to Qdrant or Pinecone costs 2-20ms per read. An LLM call to extract entities costs 200-2000ms per write. In tight agent loops that call memory 10-50 times per turn, this compounds.
-- **Correctness gap.** Nobody in this space talks about crash safety. If an agent process dies mid-write, is the memory state consistent? When agents manage anything consequential -- enterprise support, financial workflows, healthcare triage -- "we lost some memories" is unacceptable.
-- **Operational complexity.** Running most memory solutions in production means operating a Python runtime, a vector database, a graph database, an LLM API connection, and a message queue. Each is a failure mode.
-- **Feature convergence.** Because everyone builds on the same stack, everyone converges to the same feature set. The marginal cost of copying a feature is near zero when your architecture is "call an LLM and write to Qdrant."
+- **One retrieval mode.** Ask "what happened with Acme?" and similarity search returns chunks that mention Acme. It doesn't walk a timeline. It doesn't trace cause and effect. It doesn't transfer patterns from another domain. Similarity-only precision on temporal queries: 23%. On causal queries: 15%.
+- **No native cognition.** Decay, reinforcement, consolidation - the operations that make memory useful over time - don't exist in vector databases or memory wrappers. Old noise accumulates alongside new signal forever. Agents don't learn from their memories; they retrieve from them.
+- **Stitched together.** A production memory stack typically means a vector database, a key-value store, a graph database, an LLM API for extraction, and 2,000 lines of glue code. Each is a failure mode. Each adds latency. And you still only get similarity search.
 
-These aren't feature gaps. They're architectural constraints. You can't fix them without rewriting the storage layer from scratch.
+These aren't feature gaps you can patch. They're architectural constraints. You can't add temporal recall to a vector database. You can't add causal reasoning to a key-value store. You can't add native decay to an LLM wrapper. You need a different primitive.
 
 ## How HEBBS Is Different
 
-HEBBS implements cognitive operations as **algorithms inside the engine**, not as LLM-call wrappers over a distributed stack:
+HEBBS implements cognitive operations as **algorithms inside a single engine**, not as wrappers over distributed services:
 
-- **Temporal decay** is an exponential function, not a summarization prompt. Memories lose importance over time; frequently recalled memories get reinforced through Hebbian learning.
-- **Importance scoring** is computed at write time and updated on every recall -- no LLM rating required.
-- **Four recall strategies** (similarity, temporal, causal, analogical) are index traversals with bounded complexity, not LLM-mediated reasoning. Results are ranked by a composite score that blends relevance, recency, importance, and reinforcement -- with caller-configurable weights so agents can tune for "most similar" vs "most recent and important" without extra queries.
-- **Reflection** is the only place an LLM appears, and it runs exclusively in the background. It clusters related memories, proposes insights, validates them, and stores the results -- all async, never blocking a read or write.
-- **Crash safety** comes from RocksDB's write-ahead log and atomic WriteBatch operations. Kill the process between any two instructions and the engine recovers to a consistent state.
-
-This is an infrastructure play, not a features play. The same way Redis didn't win by having more features than Memcached -- it won by being the correct abstraction at the correct layer with latency guarantees nobody else could match.
+- **Four recall strategies** - similarity, temporal, causal, and analogical - each backed by a purpose-built index. Temporal recall uses a B-tree range scan (91% precision). Causal recall uses bounded graph traversal (78% precision). Analogical recall uses structural pattern matching (74% precision). All from one binary, one process, one call.
+- **Native consolidation** - the reflection pipeline clusters related memories, proposes insights via LLM, validates them, and stores consolidated knowledge with lineage back to source episodes. LLM calls happen only here - in the background, never on the hot path.
+- **Automatic decay and reinforcement** - temporal decay is an exponential function, not a summarization prompt. Memories lose importance over time; frequently recalled memories get reinforced through Hebbian learning. Signal-to-noise improves naturally.
+- **Configurable scoring weights** - every recall blends four signals: relevance, recency, importance, and reinforcement. One parameter change shifts behavior from "give me everything relevant" to "what's most recent" to "what's most important." The agent tunes its own memory.
+- **Crash safety** - RocksDB's write-ahead log and atomic WriteBatch operations. Kill the process between any two instructions and the engine recovers to a consistent state.
+- **Drop-in agent skill** - install the SKILL.md file and any compatible agent gets cognitive memory. The agent decides when to remember, what strategy to recall with, and when to consolidate. No SDK integration or glue code required.
 
 ## Architecture at a Glance
 
@@ -35,6 +33,8 @@ This is an infrastructure play, not a features play. The same way Redis didn't w
 | **gRPC + HTTP API** | 9 operations across write, read, and consolidation | Single API surface, no protocol translation |
 | **ONNX Embeddings** | Local BGE-small-en-v1.5 (swappable) | No network hop for embeddings, air-gap capable |
 | **HNSW Index** | Per-tenant similarity search | Sub-10ms recall at millions of memories |
+| **B-tree Index** | Temporal range scans by entity + timestamp | Sub-2ms temporal recall |
+| **Graph Index** | Causal edge traversal with bounded depth | Cause-and-effect reasoning across memory chains |
 | **RocksDB Storage** | Crash-safe persistence with WAL | Atomic multi-index updates, no data loss |
 | **Decay Sweep** | Background importance decay | Automatic pruning, bounded memory growth |
 | **Reflection Pipeline** | Async LLM-powered insight consolidation | Background learning without hot-path latency |
@@ -43,10 +43,10 @@ Everything runs in a single process. No sidecars. No external dependencies at ru
 
 ## Who Is HEBBS For
 
-- **AI agent builders** who need memory that keeps up with tight inference loops -- not memory that adds hundreds of milliseconds per call.
+- **AI agent builders** who need memory beyond similarity search - temporal reasoning, causal chains, analogical transfer, and consolidation that works out of the box.
 - **Production teams** shipping agents that manage real workflows, where crash safety, multi-tenant isolation, and operational simplicity are non-negotiable.
+- **Teams that want zero-config memory** - install the agent skill and the agent gets cognitive memory without writing infrastructure code.
 - **Air-gapped and on-prem deployments** where data cannot leave the network. HEBBS with local ONNX embeddings and Ollama for reflection runs fully offline.
-- **Infrastructure teams** who want a single binary they can deploy, monitor, and reason about -- not a distributed system of Python services.
 
 ## What's Next
 

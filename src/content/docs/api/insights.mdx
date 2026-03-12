@@ -23,6 +23,9 @@ Passed as query parameters for REST, or message fields for gRPC.
 | `entity_id` | string | No | Scope to this entity's insights. Omit for global. |
 | `min_confidence` | float | No | Minimum confidence threshold for returned insights. |
 | `max_results` | int | No | Maximum number of insights to return (default 20). |
+| `tenant_id` | string | No | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. Default: derived from API key or `"default"`. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Response
 

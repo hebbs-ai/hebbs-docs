@@ -22,6 +22,9 @@ The `prime` operation pre-loads session context for an entity. It blends recent 
 | `max_memories` | int | No | Maximum total memories to return (default 20). |
 | `similarity_cue` | string | No | Optional cue for similarity component. If omitted, temporal-only blend. |
 | `scoring_weights` | object | No | Override composite scoring weights. Fields: `w_relevance` (default 0.5), `w_recency` (default 0.2), `w_importance` (default 0.2), `w_reinforcement` (default 0.1). See [Composite Scoring](/concepts/recall-strategies/#composite-scoring). |
+| `tenant_id` | string | No | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. Default: derived from API key or `"default"`. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Response
 

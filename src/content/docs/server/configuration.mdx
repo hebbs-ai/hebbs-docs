@@ -446,6 +446,12 @@ hebbs-server
 
 Controls multi-tenant limits and resource bounds. These protect the server from any single tenant consuming too many resources.
 
+### How Tenants Work
+
+Every request is scoped to a tenant. In authenticated mode, the API key determines the tenant — each key is bound to exactly one `tenant_id`. The server validates that any `tenant_id` in the request matches the key's tenant; mismatches are rejected with `permission_denied`. In no-auth mode (`HEBBS_AUTH_ENABLED=false`), all operations use the `"default"` tenant unless an explicit `tenant_id` is provided.
+
+Tenant isolation is structural: storage keys in RocksDB are prefixed with the tenant ID, associative HNSW graph traversal is partitioned per tenant, and temporal indexes are scoped per tenant. There is no way for one tenant to query, modify, or observe another tenant's data.
+
 ```toml
 [tenancy]
 max_tenants = 10000

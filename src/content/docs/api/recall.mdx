@@ -30,6 +30,9 @@ The `recall` operation retrieves memories by cue, applying one or more strategie
 | `max_depth` | int | No | `5` (bounded at 10) | Maximum hops for causal graph traversal. |
 | `edge_types` | array | No | `None` (all types) | Filter causal traversal to specific edge types (e.g. `["CausedBy"]`). |
 | `analogical_alpha` | float | No | `0.5` | Balance between embedding similarity and structural similarity for analogical recall. `0.0` = pure structural, `1.0` = pure embedding. |
+| `tenant_id` | string | No | Derived from API key or `"default"` | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 Only `cue` and `strategies` are required. All other fields use smart defaults suitable for most workloads.
 

@@ -19,11 +19,25 @@ The choice is application-defined. HEBBS does not prescribe what an entity "mean
 
 ## Tenant vs Entity
 
-**Tenant** is a higher-level isolation boundary. All data is partitioned by tenant ID. One HEBBS instance can serve multiple tenants with strict isolation. Tenants typically map to organizations, workspaces, or deployments.
+| | Entity (`entity_id`) | Tenant (`tenant_id`) |
+|---|---|---|
+| **Purpose** | Domain grouping ("about what") | Infrastructure isolation ("owned by whom") |
+| **Isolation** | Logical — query filters, reflection scope | Structural — storage key prefix, index partitioning |
+| **Required** | No (optional on most operations) | No (derived from API key, or set explicitly) |
+| **Cross-scope** | Yes, within the same tenant | Never — tenants are hard boundaries |
+| **Maps to** | Customer, user, project, conversation | Organization, workspace, deployment |
+| **Set via** | Per-operation parameter | API key (auth mode) or SDK constructor / CLI flag |
 
-**Entity** is a finer-grained scope within a tenant. One tenant can have many entities. For example, tenant "acme-corp" might have entities "user-123", "user-456", "project-alpha". Memories for "user-123" are isolated from "user-456" by default.
+**Tenant** is a higher-level isolation boundary. All storage keys are prefixed by tenant. HNSW index traversal is partitioned per tenant. Data from one tenant is structurally invisible to another, even via similarity search. Tenants typically map to organizations, workspaces, or SaaS customers.
 
-Tenant isolation is structural (storage, indexes). Entity isolation is logical (query filters, reflection scope). Both are enforced at the API boundary.
+**Entity** is a finer-grained scope within a tenant. One tenant can have many entities. For example, tenant `acme-corp` might have entities `user-123`, `user-456`, `project-alpha`. Memories for `user-123` are isolated from `user-456` during entity-scoped recall, but cross-entity similarity search within the tenant is possible by omitting `entity_id`.
+
+### How tenant_id is resolved
+
+1. **Auth enabled (default)**: The `Authorization: Bearer <key>` header carries an API key. The server resolves the tenant from the key's metadata. The `tenant_id` in the request message is validated to match the key's tenant — mismatches are rejected.
+2. **Auth disabled** (`HEBBS_AUTH_ENABLED=false`): All operations use the `"default"` tenant unless an explicit `tenant_id` is provided via the SDK constructor or CLI `--tenant` flag.
+3. **SDKs**: Python and TypeScript set `tenant_id` at client construction time. It is injected into every gRPC request automatically.
+4. **CLI**: Use `--tenant <id>` or `HEBBS_TENANT=<id>` environment variable.
 
 ## How Recall Is Scoped
 

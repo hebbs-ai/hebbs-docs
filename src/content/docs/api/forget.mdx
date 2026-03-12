@@ -22,6 +22,9 @@ The `forget` operation removes memories from HEBBS. It supports deletion by enti
 | `memory_ids` | array | No* | Forget specific memories by ID. |
 | `staleness_threshold_us` | int | No | Forget memories older than this (microseconds since epoch). |
 | `memory_kind` | string | No | Filter by kind: `"episode"`, `"insight"`, `"revision"`. |
+| `tenant_id` | string | No | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. Default: derived from API key or `"default"`. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Response
 

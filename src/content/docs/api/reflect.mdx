@@ -19,6 +19,9 @@ The `reflect` operation manually triggers the reflection pipeline. The pipeline 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `entity_id` | string | No | Optional scope. If provided, only that entity's episodes are processed. If omitted, global scope (all entities). |
+| `tenant_id` | string | No | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. Default: derived from API key or `"default"`. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Response
 

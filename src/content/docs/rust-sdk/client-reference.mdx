@@ -11,21 +11,26 @@ The primary entry point for interacting with a HEBBS server.
 
 ```rust
 let client = HebbsClient::builder()
-    .address("http://localhost:50051")
+    .endpoint("http://localhost:6380")
+    .api_key("hb_your_key_here")
+    .tenant_id("acme-corp")  // optional — normally derived from API key
     .timeout(Duration::from_secs(10))
     .retry_policy(RetryPolicy::exponential(3, Duration::from_millis(100)))
-    .tls(TlsConfig::from_pem(cert, key)?)
-    .connect()
+    .build()
     .await?;
 ```
 
 | Method | Description |
 |---|---|
-| `address(impl Into<String>)` | Server address (required) |
+| `endpoint(impl Into<String>)` | Server address (required) |
 | `timeout(Duration)` | Default request timeout |
+| `api_key(impl Into<String>)` | API key for authentication |
+| `tenant_id(impl Into<String>)` | Explicit tenant ID for multi-tenant deployments. Normally derived from the API key by the server. Set this only when running without authentication or when you need to override the key-derived tenant. |
 | `retry_policy(RetryPolicy)` | Retry configuration for transient failures |
-| `tls(TlsConfig)` | TLS configuration |
-| `connect()` | Establish connection (returns `Result<HebbsClient>`) |
+| `keepalive_interval(Duration)` | HTTP/2 keepalive interval |
+| `connect_lazy(bool)` | Defer connection to first RPC (default: true) |
+| `user_agent(impl Into<String>)` | Custom User-Agent header |
+| `build()` | Build the client (returns `Result<HebbsClient>`) |
 
 ---
 

@@ -23,6 +23,9 @@ The `remember` operation stores a new memory in HEBBS. The memory is written to 
 | `context` | map | No | {} | Arbitrary key-value metadata (e.g., `source`, `channel`, `session_id`). Used for filtering. |
 | `entity_id` | string | No | — | Scope boundary. All recall is scoped by entity unless explicitly cross-entity. |
 | `edges` | array | No | [] | Typed relationships to other memories: `CausedBy`, `RelatedTo`, `FollowedBy`, etc. |
+| `tenant_id` | string | No | Derived from API key or `"default"` | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Response
 

@@ -1,9 +1,9 @@
 ---
 title: HEBBS Documentation
-description: The cognitive memory engine for AI agents. One binary. Sub-10ms recall.
+description: The cognitive memory engine for AI agents. Four recall strategies. Native consolidation. Drop-in agent skill.
 template: splash
 hero:
-  tagline: The memory engine for AI agents. One binary. Sub-10ms recall. Algorithms, not LLM wrappers.
+  tagline: The memory engine for AI agents. Four recall strategies. Native consolidation. Automatic decay. Drop-in agent skill.
   actions:
     - text: Quickstart (5 min)
       link: /getting-started/quickstart/
@@ -49,6 +49,13 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
 
   </Card>
 
+  <Card title="Agent Skill" icon="puzzle">
+    Drop-in SKILL.md for any compatible agent. No SDK integration required.
+
+    [Install the skill →](/cookbooks/agent-skill/)
+
+  </Card>
+
   <Card title="Cookbooks" icon="puzzle">
     Production-ready tutorials: sales agents, support bots, GDPR compliance,
     real-time memory surfacing.
@@ -60,15 +67,16 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
 
 ## Why HEBBS?
 
-Every memory solution in the market shares the same architecture: Python glue, an external vector database, and LLM calls in the operational path. They converge to the same features because they draw from the same well -- and they share the same hard ceiling on latency, correctness, and operational simplicity.
+Before HEBBS, agent memory was similarity search - embed a question, find the nearest vectors, hope for the best. There were vector databases, memory wrappers, and knowledge graphs, but nothing that gave agents temporal reasoning, causal chains, analogical transfer, consolidation, and decay as a single consumable primitive.
 
-HEBBS plays a different game. Cognitive operations are **algorithms inside a single embedded engine**, not LLM-call wrappers over a distributed stack:
+HEBBS is the cognitive memory engine that didn't exist until now:
 
-- **Sub-10ms p99 recall** at millions of memories -- no network hop to an external vector DB
-- **Crash-safe writes** via RocksDB WAL and atomic WriteBatch -- kill the process at any point and recover to a consistent state
-- **Decay, importance, and reinforcement** computed as math, not LLM prompts
-- **Four recall strategies** (similarity, temporal, causal, analogical) as bounded index traversals
-- **One binary, zero external dependencies** -- deploy, monitor, and reason about a single process
+- **Four recall strategies** - similarity, temporal, causal, and analogical - each backed by a purpose-built index. 91% precision on temporal queries where similarity-only gets 23%. 78% on causal where similarity-only gets 15%.
+- **Native consolidation** - the reflection pipeline clusters raw episodes, proposes insights, validates them, and stores consolidated knowledge with full lineage back to source memories. Your agent learns, not just retrieves.
+- **Automatic decay and reinforcement** - memories fade over time unless reinforced by access. Signal-to-noise improves naturally. No manual pruning.
+- **Revision with lineage** - `revise()` replaces beliefs while preserving the predecessor chain. No contradictory facts coexisting.
+- **Drop-in agent skill** - install the SKILL.md file and any compatible agent gets cognitive memory without SDK integration or glue code.
+- **One binary, zero external dependencies** - and it does all of this in under 10ms at 10 million memories.
 
 ## Core Operations
 

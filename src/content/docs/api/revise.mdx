@@ -24,6 +24,9 @@ The `revise` operation updates an existing memory. Instead of overwriting in pla
 | `context` | map | No | New or merged context. Behavior depends on `context_mode`. |
 | `context_mode` | string | No | `"merge"` (default) or `"replace"`. Controls how context is updated. |
 | `entity_id` | string | No | Entity scope for the memory. |
+| `tenant_id` | string | No | Tenant scope for data isolation. Normally derived from the API key by the server. Override only when running without authentication or for cross-tenant administrative operations. Default: derived from API key or `"default"`. |
+
+> **Note:** For REST, `tenant_id` is derived from the `Authorization` header — not passed in the request body. For gRPC, it can be set explicitly in the request message but is overridden by the API key's tenant when auth is enabled.
 
 ## Predecessor Snapshot Semantics
 
