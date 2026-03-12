@@ -111,6 +111,7 @@ impl TestServer {
             engine: engine.clone(),
             start_time: Instant::now(),
             version: "test".to_string(),
+            data_dir: std::env::temp_dir(),
         };
 
         let grpc_interceptor = middleware::grpc_auth_interceptor(auth_state);

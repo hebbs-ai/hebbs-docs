@@ -2683,7 +2683,7 @@ impl Engine {
                     }
                     let embedding_similarity = (1.0 - distance).max(0.0);
                     let structural_similarity =
-                        compute_structural_similarity(&cue_ctx, &mem, &analogical_weights);
+                        compute_structural_similarity(&cue_ctx, &mem, &analogical_weights, entity_id);
                     let relevance = analogical_weights.alpha * embedding_similarity
                         + (1.0 - analogical_weights.alpha) * structural_similarity;
 
@@ -2808,7 +2808,11 @@ impl Engine {
         }
 
         if let Err(e) = storage.write_batch(&ops) {
-            eprintln!("recall reinforcement WriteBatch failed (non-fatal): {}", e);
+            tracing::error!(
+                error = %e,
+                count = results.len(),
+                "recall reinforcement WriteBatch failed (non-fatal)"
+            );
         }
     }
 
@@ -2957,44 +2961,71 @@ fn compute_structural_similarity(
     cue_context: &HashMap<String, serde_json::Value>,
     memory: &Memory,
     weights: &AnalogicalWeights,
+    cue_entity_id: Option<&str>,
 ) -> f32 {
     let mem_context = memory.context().unwrap_or_default();
 
-    if cue_context.is_empty() && mem_context.is_empty() {
-        return 0.5; // neutral when no context on either side
-    }
-    if cue_context.is_empty() || mem_context.is_empty() {
-        return 0.0;
-    }
-
-    // Key overlap: Jaccard-like coefficient
-    let cue_keys: HashSet<&String> = cue_context.keys().collect();
-    let mem_keys: HashSet<&String> = mem_context.keys().collect();
-    let intersection = cue_keys.intersection(&mem_keys).count();
-    let union = cue_keys.union(&mem_keys).count();
-    let key_overlap = if union > 0 {
-        intersection as f32 / union as f32
+    // Key overlap and type match: require non-empty context on both sides.
+    let (key_overlap, type_match) = if cue_context.is_empty() || mem_context.is_empty() {
+        (0.0_f32, 0.0_f32)
     } else {
-        0.0
+        // Key overlap: Jaccard-like coefficient
+        let cue_keys: HashSet<&String> = cue_context.keys().collect();
+        let mem_keys: HashSet<&String> = mem_context.keys().collect();
+        let intersection = cue_keys.intersection(&mem_keys).count();
+        let union = cue_keys.union(&mem_keys).count();
+        let ko = if union > 0 {
+            intersection as f32 / union as f32
+        } else {
+            0.0
+        };
+
+        // Value type match: for shared keys, do the JSON types match?
+        let shared_keys: Vec<&&String> = cue_keys.intersection(&mem_keys).collect();
+        let tm = if !shared_keys.is_empty() {
+            let matches = shared_keys
+                .iter()
+                .filter(|k| {
+                    json_type_matches(&cue_context[k.as_str()], &mem_context[k.as_str()])
+                })
+                .count();
+            matches as f32 / shared_keys.len() as f32
+        } else {
+            0.0
+        };
+
+        (ko, tm)
     };
 
-    // Value type match: for shared keys, do the JSON types match?
-    let shared_keys: Vec<&&String> = cue_keys.intersection(&mem_keys).collect();
-    let type_match = if !shared_keys.is_empty() {
-        let matches = shared_keys
-            .iter()
-            .filter(|k| json_type_matches(&cue_context[k.as_str()], &mem_context[k.as_str()]))
-            .count();
-        matches as f32 / shared_keys.len() as f32
-    } else {
-        0.0
+    // Kind match: compare against cue_context["kind"] if present.
+    let kind_match = match cue_context.get("kind").and_then(|v| v.as_str()) {
+        Some(cue_kind) => {
+            let mem_kind_str = match memory.kind {
+                MemoryKind::Episode => "episode",
+                MemoryKind::Insight => "insight",
+                MemoryKind::Revision => "revision",
+            };
+            if cue_kind == mem_kind_str {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        None => 0.5, // neutral when cue doesn't specify kind
     };
 
-    // Kind match: Episode == Episode is a structural signal
-    let kind_match = 1.0_f32; // cue doesn't have a kind, so we default to match
-
-    // Entity pattern match: similar entity_id format
-    let entity_pattern = 0.5_f32; // neutral default
+    // Entity pattern match: compare entity IDs.
+    let entity_pattern = match (cue_entity_id, memory.entity_id.as_deref()) {
+        (Some(cue_eid), Some(mem_eid)) => {
+            if cue_eid == mem_eid {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        (None, None) => 0.5, // both unscoped — neutral
+        _ => 0.0,            // one scoped, one not — mismatch
+    };
 
     weights.key_overlap_weight * key_overlap
         + weights.value_type_match_weight * type_match
@@ -4169,8 +4200,10 @@ mod tests {
         };
 
         let weights = AnalogicalWeights::default();
-        let score = compute_structural_similarity(&cue_ctx, &mem, &weights);
-        // Same keys, same types (both strings), should have high structural score
+        let score = compute_structural_similarity(&cue_ctx, &mem, &weights, None);
+        // Same keys, same types (both strings): key_overlap=1.0, type_match=1.0
+        // kind_match=0.5 (no kind in cue), entity_pattern=0.5 (both None)
+        // = 0.4*1.0 + 0.3*1.0 + 0.2*0.5 + 0.1*0.5 = 0.85
         assert!(
             score > 0.5,
             "matching context structure should score > 0.5, got {}",
@@ -4200,8 +4233,96 @@ mod tests {
         };
 
         let weights = AnalogicalWeights::default();
-        let score = compute_structural_similarity(&cue_ctx, &mem, &weights);
-        assert!((0.0..=1.0).contains(&score));
+        let score = compute_structural_similarity(&cue_ctx, &mem, &weights, None);
+        // key_overlap=0, type_match=0, kind_match=0.5 (no kind in cue), entity_pattern=0.5 (both None)
+        // = 0.4*0 + 0.3*0 + 0.2*0.5 + 0.1*0.5 = 0.15
+        let expected = 0.2 * 0.5 + 0.1 * 0.5; // 0.15
+        assert!(
+            (score - expected).abs() < 0.001,
+            "empty contexts should score {}, got {}",
+            expected,
+            score
+        );
+    }
+
+    #[test]
+    fn structural_similarity_kind_mismatch() {
+        let mut cue_ctx = HashMap::new();
+        cue_ctx.insert("kind".to_string(), serde_json::json!("episode"));
+
+        let mem = Memory {
+            memory_id: vec![0u8; 16],
+            content: "test".to_string(),
+            importance: 0.5,
+            context_bytes: Vec::new(),
+            entity_id: None,
+            embedding: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            decay_score: 0.5,
+            kind: MemoryKind::Insight,
+            device_id: None,
+            logical_clock: 0,
+            associative_embedding: None,
+        };
+
+        let weights = AnalogicalWeights::default();
+        let score_mismatch = compute_structural_similarity(&cue_ctx, &mem, &weights, None);
+
+        // Same test but with matching kind
+        let mem_match = Memory {
+            kind: MemoryKind::Episode,
+            ..mem
+        };
+        let score_match = compute_structural_similarity(&cue_ctx, &mem_match, &weights, None);
+
+        assert!(
+            score_match > score_mismatch,
+            "kind match ({}) should score higher than mismatch ({})",
+            score_match,
+            score_mismatch
+        );
+    }
+
+    #[test]
+    fn structural_similarity_entity_match_vs_mismatch() {
+        let cue_ctx = HashMap::new();
+        let weights = AnalogicalWeights::default();
+
+        let mem_same = Memory {
+            memory_id: vec![0u8; 16],
+            content: "test".to_string(),
+            importance: 0.5,
+            context_bytes: Vec::new(),
+            entity_id: Some("proj-alpha".to_string()),
+            embedding: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            decay_score: 0.5,
+            kind: MemoryKind::Episode,
+            device_id: None,
+            logical_clock: 0,
+            associative_embedding: None,
+        };
+
+        let mem_diff = Memory {
+            entity_id: Some("proj-beta".to_string()),
+            ..mem_same.clone()
+        };
+
+        let score_same = compute_structural_similarity(&cue_ctx, &mem_same, &weights, Some("proj-alpha"));
+        let score_diff = compute_structural_similarity(&cue_ctx, &mem_diff, &weights, Some("proj-alpha"));
+
+        assert!(
+            score_same > score_diff,
+            "same entity ({}) should score higher than different entity ({})",
+            score_same,
+            score_diff
+        );
     }
 
     // --- Bounds ---

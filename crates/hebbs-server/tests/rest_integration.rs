@@ -27,6 +27,7 @@ fn test_app(engine: Arc<Engine>) -> axum::Router {
         Arc::new(HebbsMetrics::new()),
         Instant::now(),
         "test".to_string(),
+        std::env::temp_dir(),
     );
     rest::create_router(state)
 }

@@ -4,7 +4,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 #[command(
     name = "hebbs-cli",
     version,
-    about = "HEBBS interactive CLI client -- the redis-cli of cognitive memory"
+    about = "HEBBS interactive CLI client -- the cli of cognitive memory"
 )]
 pub struct Cli {
     /// Server gRPC endpoint
@@ -132,6 +132,10 @@ pub enum Commands {
         /// Analogical alpha: blends embedding similarity (1.0) vs structural similarity (0.0). Default: 0.5.
         #[arg(long)]
         analogical_alpha: Option<f32>,
+
+        /// Context as JSON object (for analogical structural similarity comparison)
+        #[arg(short, long)]
+        context: Option<String>,
     },
 
     /// Update an existing memory

@@ -242,10 +242,13 @@ pub async fn run(config: HebbsConfig) -> Result<(), Box<dyn std::error::Error>> 
         auth_state: auth_state.clone(),
     };
 
+    let data_dir = std::path::PathBuf::from(&config.storage.data_dir);
+
     let health_svc = HealthServiceImpl {
         engine: engine.clone(),
         start_time,
         version: VERSION.to_string(),
+        data_dir: data_dir.clone(),
     };
 
     let grpc_interceptor = middleware::grpc_auth_interceptor(auth_state.clone());
@@ -256,6 +259,7 @@ pub async fn run(config: HebbsConfig) -> Result<(), Box<dyn std::error::Error>> 
         metrics: metrics.clone(),
         start_time,
         version: VERSION.to_string(),
+        data_dir: data_dir.clone(),
         sse_subscriptions: std::sync::Arc::new(parking_lot::Mutex::new(
             std::collections::HashMap::new(),
         )),

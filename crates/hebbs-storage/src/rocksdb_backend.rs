@@ -41,6 +41,66 @@ impl RocksDbBackend {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
         let path = data_dir.as_ref();
 
+        // Pre-flight: ensure parent directory exists and data_dir is
+        // creatable/writable before handing off to RocksDB, which
+        // produces cryptic errors when the path is invalid.
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                return Err(StorageError::Io {
+                    operation: "open",
+                    message: format!(
+                        "parent directory does not exist: {}",
+                        parent.display()
+                    ),
+                    source: None,
+                });
+            }
+        }
+
+        // Create the data directory explicitly so we control the error.
+        if !path.exists() {
+            std::fs::create_dir_all(path).map_err(|e| StorageError::Io {
+                operation: "open",
+                message: format!(
+                    "cannot create data directory {}: {}",
+                    path.display(),
+                    e
+                ),
+                source: Some(Box::new(e)),
+            })?;
+        }
+
+        // Verify the path is a directory and writable.
+        let meta = std::fs::metadata(path).map_err(|e| StorageError::Io {
+            operation: "open",
+            message: format!(
+                "cannot read data directory metadata {}: {}",
+                path.display(),
+                e
+            ),
+            source: Some(Box::new(e)),
+        })?;
+        if !meta.is_dir() {
+            return Err(StorageError::Io {
+                operation: "open",
+                message: format!(
+                    "data path exists but is not a directory: {}",
+                    path.display()
+                ),
+                source: None,
+            });
+        }
+        if meta.permissions().readonly() {
+            return Err(StorageError::Io {
+                operation: "open",
+                message: format!(
+                    "data directory is read-only: {}",
+                    path.display()
+                ),
+                source: None,
+            });
+        }
+
         let mut block_opts = BlockBasedOptions::default();
         block_opts.set_bloom_filter(10.0, false);
         block_opts.set_block_size(16 * 1024);
@@ -458,6 +518,37 @@ mod tests {
             results.len(),
             5,
             "all 5 temporal keys must be returned after compaction"
+        );
+    }
+
+    #[test]
+    fn open_fails_when_parent_dir_missing() {
+        let result = RocksDbBackend::open("/nonexistent/parent/data");
+        let err = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("expected error for missing parent dir"),
+        };
+        assert!(
+            err.contains("parent directory does not exist"),
+            "expected parent-dir error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn open_fails_when_path_is_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("not_a_dir");
+        std::fs::write(&file_path, b"hello").unwrap();
+        let result = RocksDbBackend::open(&file_path);
+        let err = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("expected error for non-directory path"),
+        };
+        assert!(
+            err.contains("not a directory"),
+            "expected not-a-directory error, got: {}",
+            err
         );
     }
 }

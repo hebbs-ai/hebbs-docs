@@ -57,6 +57,7 @@ pub async fn execute(
             edge_types,
             time_range,
             analogical_alpha,
+            context,
         } => {
             execute_recall(
                 conn,
@@ -72,6 +73,7 @@ pub async fn execute(
                 edge_types,
                 time_range,
                 analogical_alpha,
+                context,
                 tenant_id,
                 &mut stdout,
             )
@@ -403,10 +405,19 @@ async fn execute_recall(
     edge_types: Option<Vec<String>>,
     time_range: Option<String>,
     analogical_alpha: Option<f32>,
+    context: Option<String>,
     tenant_id: Option<&str>,
     w: &mut dyn Write,
 ) -> Result<(), CliError> {
     let cue = cue.unwrap_or_default();
+
+    let cue_context = match context {
+        Some(ref c) => Some(
+            format::parse_context_json(c)
+                .map_err(|e| CliError::InvalidArgument { message: e })?,
+        ),
+        None => None,
+    };
 
     let strategy_type = match strategy {
         Some(StrategyArg::Similarity) => pb::RecallStrategyType::Similarity,
@@ -488,7 +499,7 @@ async fn execute_recall(
         strategies: vec![strategy_config],
         top_k: Some(top_k),
         scoring_weights,
-        cue_context: None,
+        cue_context,
         tenant_id: tenant_id.map(str::to_string),
     };
 

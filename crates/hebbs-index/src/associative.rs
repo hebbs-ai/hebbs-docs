@@ -211,10 +211,13 @@ impl AssociativeIndex {
                         .collect();
                     normalize_vec(&raw)
                 } else {
-                    seed_assoc.to_vec()
+                    // Dimension mismatch — no valid offset for this edge type.
+                    return Ok(Vec::new());
                 }
             } else {
-                seed_assoc.to_vec()
+                // No learned offset for this edge type — return empty rather
+                // than falling back to raw semantic similarity.
+                return Ok(Vec::new());
             }
         };
 
@@ -243,10 +246,13 @@ impl AssociativeIndex {
                         .collect();
                     normalize_vec(&raw)
                 } else {
-                    seed_assoc.to_vec()
+                    // Dimension mismatch — no valid offset for this edge type.
+                    return Ok(Vec::new());
                 }
             } else {
-                seed_assoc.to_vec()
+                // No learned offset for this edge type — return empty rather
+                // than falling back to raw semantic similarity.
+                return Ok(Vec::new());
             }
         };
 

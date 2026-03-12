@@ -579,6 +579,7 @@ async fn grpc_health_check() {
         engine: engine.clone(),
         start_time: Instant::now(),
         version: "0.1.0-test".to_string(),
+        data_dir: std::env::temp_dir(),
     };
 
     let resp = svc
@@ -623,6 +624,7 @@ async fn grpc_health_reflects_memory_count() {
         engine,
         start_time: Instant::now(),
         version: "test".to_string(),
+        data_dir: std::env::temp_dir(),
     };
 
     let resp = health_svc

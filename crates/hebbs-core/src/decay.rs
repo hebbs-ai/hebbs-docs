@@ -392,23 +392,45 @@ fn run_decay_sweep(storage: &Arc<dyn StorageBackend>, config: &DecayConfig) {
         }
 
         if !update_ops.is_empty() {
-            let _ = storage.write_batch(&update_ops);
+            if let Err(e) = storage.write_batch(&update_ops) {
+                tracing::error!(
+                    error = %e,
+                    count = update_ops.len(),
+                    "decay score update WriteBatch failed (non-fatal)"
+                );
+            }
         }
 
         if !candidate_ops.is_empty() {
-            let _ = storage.write_batch(&candidate_ops);
+            if let Err(e) = storage.write_batch(&candidate_ops) {
+                tracing::error!(
+                    error = %e,
+                    count = candidate_ops.len(),
+                    "auto-forget candidate WriteBatch failed (non-fatal)"
+                );
+            }
         }
 
         // Update cursor to last processed key
         if let Some((last_key, _)) = batch_entries.last() {
             current_cursor = last_key.clone();
-            let _ = storage.put(ColumnFamilyName::Meta, &cursor_key, &current_cursor);
+            if let Err(e) = storage.put(ColumnFamilyName::Meta, &cursor_key, &current_cursor) {
+                tracing::error!(
+                    error = %e,
+                    "decay cursor update failed (non-fatal)"
+                );
+            }
         }
 
         // If we processed fewer than batch_size, we've reached the end
         if batch_entries.len() < config.batch_size {
             current_cursor = Vec::new();
-            let _ = storage.put(ColumnFamilyName::Meta, &cursor_key, &current_cursor);
+            if let Err(e) = storage.put(ColumnFamilyName::Meta, &cursor_key, &current_cursor) {
+                tracing::error!(
+                    error = %e,
+                    "decay cursor reset failed (non-fatal)"
+                );
+            }
             break;
         }
     }
@@ -422,7 +444,13 @@ pub fn read_auto_forget_candidates(storage: &dyn StorageBackend) -> Vec<Vec<u8>>
     let prefix = AUTO_FORGET_PREFIX.as_bytes().to_vec();
     let entries = match storage.prefix_iterator(ColumnFamilyName::Meta, &prefix) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "read auto-forget candidates failed (non-fatal)"
+            );
+            return Vec::new();
+        }
     };
 
     let mut candidates = Vec::with_capacity(entries.len());
@@ -453,7 +481,13 @@ pub fn clear_auto_forget_candidates(storage: &dyn StorageBackend) {
             })
             .collect();
         if !ops.is_empty() {
-            let _ = storage.write_batch(&ops);
+            if let Err(e) = storage.write_batch(&ops) {
+                tracing::error!(
+                    error = %e,
+                    count = ops.len(),
+                    "clear auto-forget candidates WriteBatch failed (non-fatal)"
+                );
+            }
         }
     }
 }

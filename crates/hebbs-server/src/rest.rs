@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,6 +43,7 @@ pub struct AppState {
     pub metrics: Arc<HebbsMetrics>,
     pub start_time: std::time::Instant,
     pub version: String,
+    pub data_dir: PathBuf,
     pub(crate) sse_subscriptions: SubscriptionMap,
     pub reflect_config: Option<ReflectConfig>,
 }
@@ -52,12 +54,14 @@ impl AppState {
         metrics: Arc<HebbsMetrics>,
         start_time: std::time::Instant,
         version: String,
+        data_dir: PathBuf,
     ) -> Self {
         Self {
             engine,
             metrics,
             start_time,
             version,
+            data_dir,
             sse_subscriptions: Arc::new(Mutex::new(HashMap::new())),
             reflect_config: None,
         }
@@ -1240,6 +1244,18 @@ async fn liveness_handler() -> impl IntoResponse {
 }
 
 async fn readiness_handler(State(state): State<AppState>) -> impl IntoResponse {
+    // Check data directory still exists on disk.
+    if !state.data_dir.exists() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "not_ready",
+                "reason": "data directory missing"
+            })),
+        )
+            .into_response();
+    }
+
     let engine = state.engine.clone();
     let count_result = tokio::task::spawn_blocking(move || engine.count()).await;
 
