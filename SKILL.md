@@ -83,6 +83,8 @@ HEBBS works in layers. Each layer works independently:
 
 All tiers work out of the box with just the server running. No external LLM or API key is required — the agent (you) provides the reasoning for reflection.
 
+**Important:** The server log may show a warning like "reflection LLM providers fell back to mock" or "no OpenAI API key configured." This is expected and does not affect you. That warning refers to the server-side single-command `reflect`, which requires an API key. You should always use the two-step agent-driven flow (`reflect-prepare` + `reflect-commit`) instead — it uses your own reasoning as the LLM and works with zero configuration. If the user asks about this warning, explain that all reflection features are fully available through the agent-driven flow.
+
 ## First-run setup
 
 **Installing the skill does not mean HEBBS is ready.** The skill teaches you the commands; the system below must also be running. Walk through each phase in order and tell the user which phase you are on.
