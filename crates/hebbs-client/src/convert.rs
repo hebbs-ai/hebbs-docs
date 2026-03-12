@@ -62,10 +62,7 @@ pub fn remember_options_to_proto(
 //  Recall
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn recall_options_to_proto(
-    opts: &RecallOptions,
-    tenant_id: Option<&str>,
-) -> pb::RecallRequest {
+pub fn recall_options_to_proto(opts: &RecallOptions, tenant_id: Option<&str>) -> pb::RecallRequest {
     let strategies = opts
         .strategies
         .iter()
@@ -168,10 +165,7 @@ fn proto_strategy_detail_to_domain(
 //  Prime
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn prime_options_to_proto(
-    opts: &PrimeOptions,
-    tenant_id: Option<&str>,
-) -> pb::PrimeRequest {
+pub fn prime_options_to_proto(opts: &PrimeOptions, tenant_id: Option<&str>) -> pb::PrimeRequest {
     pb::PrimeRequest {
         entity_id: opts.entity_id.clone(),
         context: opts.context.as_ref().map(json_map_to_struct),
@@ -187,10 +181,7 @@ pub fn prime_options_to_proto(
 //  Revise
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn revise_options_to_proto(
-    opts: &ReviseOptions,
-    tenant_id: Option<&str>,
-) -> pb::ReviseRequest {
+pub fn revise_options_to_proto(opts: &ReviseOptions, tenant_id: Option<&str>) -> pb::ReviseRequest {
     let context_mode = match opts.context_mode {
         ContextMode::Merge => pb::ContextMode::Merge as i32,
         ContextMode::Replace => pb::ContextMode::Replace as i32,
@@ -212,10 +203,7 @@ pub fn revise_options_to_proto(
 //  Forget
 // ═══════════════════════════════════════════════════════════════════════
 
-pub fn forget_criteria_to_proto(
-    c: &ForgetCriteria,
-    tenant_id: Option<&str>,
-) -> pb::ForgetRequest {
+pub fn forget_criteria_to_proto(c: &ForgetCriteria, tenant_id: Option<&str>) -> pb::ForgetRequest {
     pb::ForgetRequest {
         memory_ids: c.memory_ids.iter().map(|u| u.to_bytes().to_vec()).collect(),
         entity_id: c.entity_id.clone(),

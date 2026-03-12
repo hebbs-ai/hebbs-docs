@@ -1400,14 +1400,18 @@ fn forget_by_entity_after_compaction_rocksdb() {
 
     // Delete one memory by ID, which triggers compaction on all CFs
     // (including Temporal), flushing memtable data to SST files.
-    let output = engine.forget(ForgetCriteria::by_ids(vec![extra.memory_id])).unwrap();
+    let output = engine
+        .forget(ForgetCriteria::by_ids(vec![extra.memory_id]))
+        .unwrap();
     assert_eq!(output.forgotten_count, 1);
 
     // Force an additional compaction to guarantee SST flush.
     raw_backend.compact(ColumnFamilyName::Temporal).unwrap();
 
     // This is the operation that previously returned forgotten_count: 0.
-    let output = engine.forget(ForgetCriteria::by_entity("user_prefs")).unwrap();
+    let output = engine
+        .forget(ForgetCriteria::by_entity("user_prefs"))
+        .unwrap();
     assert_eq!(
         output.forgotten_count, 6,
         "forget-by-entity must find all 6 memories even after Temporal CF compaction"

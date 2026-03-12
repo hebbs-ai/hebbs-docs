@@ -26,8 +26,7 @@ use hebbs_embed::MockEmbedder;
 use hebbs_index::HnswParams;
 use hebbs_proto::generated::{
     health_service_server::HealthServiceServer, memory_service_server::MemoryServiceServer,
-    reflect_service_server::ReflectServiceServer,
-    subscribe_service_server::SubscribeServiceServer,
+    reflect_service_server::ReflectServiceServer, subscribe_service_server::SubscribeServiceServer,
 };
 use hebbs_reflect::{LlmProviderConfig, ProviderType};
 use hebbs_server::grpc::health_service::HealthServiceImpl;
@@ -56,8 +55,7 @@ impl TestServer {
         let backend = Arc::new(hebbs_storage::InMemoryBackend::new());
         let embedder = Arc::new(MockEmbedder::default_dims());
         let params = HnswParams::with_m(384, 4);
-        let engine =
-            Arc::new(Engine::new_with_params(backend, embedder, params, 42).unwrap());
+        let engine = Arc::new(Engine::new_with_params(backend, embedder, params, 42).unwrap());
 
         let metrics = Arc::new(HebbsMetrics::new());
         let key_cache = Arc::new(KeyCache::new());
@@ -220,8 +218,7 @@ fn parse_recall_results(output: &Output) -> Vec<serde_json::Value> {
     if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str(lines[0]) {
         return arr;
     }
-    serde_json::from_str::<Vec<serde_json::Value>>(&stdout.trim().to_string())
-        .unwrap_or_default()
+    serde_json::from_str::<Vec<serde_json::Value>>(stdout.trim()).unwrap_or_default()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -233,8 +230,15 @@ async fn skill_status() {
     let server = TestServer::start().await;
     let json = run_cli_success(&server, &["status"]);
     assert!(json["version"].is_string(), "status must return version");
-    assert_eq!(json["memory_count"].as_u64().unwrap(), 0, "fresh server has 0 memories");
-    assert!(json["uptime_seconds"].as_u64().is_some(), "status must return uptime");
+    assert_eq!(
+        json["memory_count"].as_u64().unwrap(),
+        0,
+        "fresh server has 0 memories"
+    );
+    assert!(
+        json["uptime_seconds"].as_u64().is_some(),
+        "status must return uptime"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -259,10 +263,16 @@ async fn skill_remember_stores_content_correctly() {
     assert!(!extract_id(&json).is_empty(), "must return a memory_id");
     assert_eq!(json["content"].as_str().unwrap(), "User prefers dark mode");
     let imp = json["importance"].as_f64().unwrap();
-    assert!((imp - 0.8).abs() < 0.01, "importance should be 0.8, got {imp}");
+    assert!(
+        (imp - 0.8).abs() < 0.01,
+        "importance should be 0.8, got {imp}"
+    );
     assert_eq!(json["entity_id"].as_str().unwrap(), "user_prefs");
     assert_eq!(json["kind"].as_str().unwrap(), "episode");
-    assert!(json["created_at"].as_u64().unwrap() > 0, "created_at must be set");
+    assert!(
+        json["created_at"].as_u64().unwrap() > 0,
+        "created_at must be set"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -281,7 +291,10 @@ async fn skill_remember_with_context_preserves_metadata() {
     );
 
     assert!(!extract_id(&json).is_empty());
-    assert_eq!(json["content"].as_str().unwrap(), "Meeting notes from Q2 review");
+    assert_eq!(
+        json["content"].as_str().unwrap(),
+        "Meeting notes from Q2 review"
+    );
     assert_eq!(json["context"]["source"].as_str().unwrap(), "email");
     assert_eq!(json["context"]["topic"].as_str().unwrap(), "Q2");
     assert_eq!(json["entity_id"].as_str().unwrap(), "meetings");
@@ -295,15 +308,24 @@ async fn skill_remember_with_context_preserves_metadata() {
 async fn skill_get_returns_stored_memory() {
     let server = TestServer::start().await;
 
-    let mem = run_cli_success(&server, &[
-        "remember", "Contract renewal is on March 15",
-        "--importance", "0.9",
-        "--entity-id", "legal",
-    ]);
+    let mem = run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Contract renewal is on March 15",
+            "--importance",
+            "0.9",
+            "--entity-id",
+            "legal",
+        ],
+    );
     let mem_id = extract_id(&mem);
 
     let get_json = run_cli_success(&server, &["get", &mem_id]);
-    assert_eq!(get_json["content"].as_str().unwrap(), "Contract renewal is on March 15");
+    assert_eq!(
+        get_json["content"].as_str().unwrap(),
+        "Contract renewal is on March 15"
+    );
     assert!((get_json["importance"].as_f64().unwrap() - 0.9).abs() < 0.01);
     assert_eq!(get_json["entity_id"].as_str().unwrap(), "legal");
 }
@@ -320,9 +342,16 @@ async fn skill_inspect_shows_detail() {
     let mem_id = extract_id(&mem);
 
     let output = run_cli(&server, &["inspect", &mem_id]);
-    assert!(output.status.success(), "inspect failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "inspect failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Memory to inspect"), "inspect output must contain the memory content");
+    assert!(
+        stdout.contains("Memory to inspect"),
+        "inspect output must contain the memory content"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -333,34 +362,74 @@ async fn skill_inspect_shows_detail() {
 async fn skill_recall_similarity_returns_results() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &[
-        "remember", "User prefers dark mode in all applications",
-        "--importance", "0.8", "--entity-id", "user_prefs",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "User likes minimal UI designs",
-        "--importance", "0.6", "--entity-id", "user_prefs",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "User changed theme to Solarized Dark",
-        "--importance", "0.5", "--entity-id", "user_prefs",
-    ]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "User prefers dark mode in all applications",
+            "--importance",
+            "0.8",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "User likes minimal UI designs",
+            "--importance",
+            "0.6",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "User changed theme to Solarized Dark",
+            "--importance",
+            "0.5",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
 
-    let output = run_cli(&server, &[
-        "recall", "dark mode preferences",
-        "--strategy", "similarity",
-        "--top-k", "5",
-        "--entity-id", "user_prefs",
-    ]);
+    let output = run_cli(
+        &server,
+        &[
+            "recall",
+            "dark mode preferences",
+            "--strategy",
+            "similarity",
+            "--top-k",
+            "5",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
     assert!(output.status.success(), "recall similarity failed");
 
     let results = parse_recall_results(&output);
-    assert!(!results.is_empty(), "recall must return at least 1 result for 3 stored memories");
+    assert!(
+        !results.is_empty(),
+        "recall must return at least 1 result for 3 stored memories"
+    );
 
     for r in &results {
-        assert!(r["memory"].is_object(), "each result must have a memory object");
-        assert!(r["memory"]["content"].is_string(), "memory must have content");
-        assert!(r["score"].is_number(), "each result must have a composite score");
+        assert!(
+            r["memory"].is_object(),
+            "each result must have a memory object"
+        );
+        assert!(
+            r["memory"]["content"].is_string(),
+            "memory must have content"
+        );
+        assert!(
+            r["score"].is_number(),
+            "each result must have a composite score"
+        );
         assert!(
             r["strategy_details"].is_array(),
             "each result must have strategy_details"
@@ -376,33 +445,55 @@ async fn skill_recall_similarity_returns_results() {
 async fn skill_recall_temporal_returns_ordered_results() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &[
-        "remember", "First event of the day",
-        "--entity-id", "daily",
-    ]);
+    run_cli_success(
+        &server,
+        &["remember", "First event of the day", "--entity-id", "daily"],
+    );
     // Tiny sleep to ensure distinct timestamps
     std::thread::sleep(std::time::Duration::from_millis(2));
-    run_cli_success(&server, &[
-        "remember", "Second event of the day",
-        "--entity-id", "daily",
-    ]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Second event of the day",
+            "--entity-id",
+            "daily",
+        ],
+    );
 
-    let output = run_cli(&server, &[
-        "recall", "daily events",
-        "--strategy", "temporal",
-        "--entity-id", "daily",
-        "--top-k", "5",
-    ]);
-    assert!(output.status.success(), "recall temporal failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &[
+            "recall",
+            "daily events",
+            "--strategy",
+            "temporal",
+            "--entity-id",
+            "daily",
+            "--top-k",
+            "5",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "recall temporal failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let results = parse_recall_results(&output);
-    assert!(results.len() >= 2, "temporal recall should return both memories, got {}", results.len());
+    assert!(
+        results.len() >= 2,
+        "temporal recall should return both memories, got {}",
+        results.len()
+    );
 
     let content_0 = results[0]["memory"]["content"].as_str().unwrap();
     let content_1 = results[1]["memory"]["content"].as_str().unwrap();
     assert!(
         content_0.contains("Second") || content_1.contains("Second"),
-        "temporal recall must contain 'Second event': got '{}' and '{}'", content_0, content_1
+        "temporal recall must contain 'Second event': got '{}' and '{}'",
+        content_0,
+        content_1
     );
 }
 
@@ -414,18 +505,42 @@ async fn skill_recall_temporal_returns_ordered_results() {
 async fn skill_recall_with_weights() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &["remember", "Important architecture decision", "--importance", "0.9"]);
-    run_cli_success(&server, &["remember", "Minor style preference", "--importance", "0.3"]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Important architecture decision",
+            "--importance",
+            "0.9",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &["remember", "Minor style preference", "--importance", "0.3"],
+    );
 
-    let output = run_cli(&server, &[
-        "recall", "architecture",
-        "--strategy", "similarity",
-        "--weights", "0.3:0.1:0.5:0.1",
-    ]);
-    assert!(output.status.success(), "recall with weights failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &[
+            "recall",
+            "architecture",
+            "--strategy",
+            "similarity",
+            "--weights",
+            "0.3:0.1:0.5:0.1",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "recall with weights failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let results = parse_recall_results(&output);
-    assert!(!results.is_empty(), "recall with weights must return results");
+    assert!(
+        !results.is_empty(),
+        "recall with weights must return results"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -438,17 +553,33 @@ async fn skill_recall_ef_search() {
 
     run_cli_success(&server, &["remember", "contract renewal terms"]);
 
-    let output = run_cli(&server, &[
-        "recall", "contract renewal",
-        "--strategy", "similarity",
-        "--ef-search", "200",
-    ]);
-    assert!(output.status.success(), "recall with ef-search failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &[
+            "recall",
+            "contract renewal",
+            "--strategy",
+            "similarity",
+            "--ef-search",
+            "200",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "recall with ef-search failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let results = parse_recall_results(&output);
-    assert!(!results.is_empty(), "ef-search recall must return the stored memory");
     assert!(
-        results[0]["memory"]["content"].as_str().unwrap().contains("contract"),
+        !results.is_empty(),
+        "ef-search recall must return the stored memory"
+    );
+    assert!(
+        results[0]["memory"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("contract"),
         "result should contain the stored contract memory"
     );
 }
@@ -461,19 +592,37 @@ async fn skill_recall_ef_search() {
 async fn skill_recall_causal_with_flags() {
     let server = TestServer::start().await;
 
-    let mem = run_cli_success(&server, &[
-        "remember", "Root cause: pricing was too high", "--importance", "0.9",
-    ]);
+    let mem = run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Root cause: pricing was too high",
+            "--importance",
+            "0.9",
+        ],
+    );
     let mem_id = extract_id(&mem);
 
-    let output = run_cli(&server, &[
-        "recall", "pricing pushback",
-        "--strategy", "causal",
-        "--seed", &mem_id,
-        "--max-depth", "3",
-        "--edge-types", "caused_by,followed_by",
-    ]);
-    assert!(output.status.success(), "causal recall failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &[
+            "recall",
+            "pricing pushback",
+            "--strategy",
+            "causal",
+            "--seed",
+            &mem_id,
+            "--max-depth",
+            "3",
+            "--edge-types",
+            "caused_by,followed_by",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "causal recall failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -486,12 +635,22 @@ async fn skill_recall_analogical_alpha() {
 
     run_cli_success(&server, &["remember", "Similar pricing dynamics in Q1"]);
 
-    let output = run_cli(&server, &[
-        "recall", "pricing patterns",
-        "--strategy", "analogical",
-        "--analogical-alpha", "0.2",
-    ]);
-    assert!(output.status.success(), "analogical recall failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &[
+            "recall",
+            "pricing patterns",
+            "--strategy",
+            "analogical",
+            "--analogical-alpha",
+            "0.2",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "analogical recall failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -502,40 +661,83 @@ async fn skill_recall_analogical_alpha() {
 async fn skill_prime_returns_entity_memories() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &[
-        "remember", "User prefers dark mode", "--entity-id", "user_prefs",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "User likes minimal UI", "--entity-id", "user_prefs",
-    ]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "User prefers dark mode",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "User likes minimal UI",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
 
     let output = run_cli(&server, &["prime", "user_prefs", "--max-memories", "20"]);
-    assert!(output.status.success(), "prime failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "prime failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let results = parse_recall_results(&output);
-    assert_eq!(results.len(), 2, "prime should return both memories for user_prefs entity");
+    assert_eq!(
+        results.len(),
+        2,
+        "prime should return both memories for user_prefs entity"
+    );
 
-    let contents: Vec<&str> = results.iter()
+    let contents: Vec<&str> = results
+        .iter()
         .filter_map(|r| r["memory"]["content"].as_str())
         .collect();
-    assert!(contents.iter().any(|c| c.contains("dark mode")), "prime results must include 'dark mode' memory");
-    assert!(contents.iter().any(|c| c.contains("minimal UI")), "prime results must include 'minimal UI' memory");
+    assert!(
+        contents.iter().any(|c| c.contains("dark mode")),
+        "prime results must include 'dark mode' memory"
+    );
+    assert!(
+        contents.iter().any(|c| c.contains("minimal UI")),
+        "prime results must include 'minimal UI' memory"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn skill_prime_with_similarity_cue() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &[
-        "remember", "User prefers dark mode", "--entity-id", "user_prefs",
-    ]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "User prefers dark mode",
+            "--entity-id",
+            "user_prefs",
+        ],
+    );
 
-    let output = run_cli(&server, &[
-        "prime", "user_prefs",
-        "--max-memories", "10",
-        "--similarity-cue", "UI preferences",
-    ]);
-    assert!(output.status.success(), "prime with similarity-cue failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &[
+            "prime",
+            "user_prefs",
+            "--max-memories",
+            "10",
+            "--similarity-cue",
+            "UI preferences",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "prime with similarity-cue failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -556,21 +758,33 @@ async fn skill_reflect_full_loop() {
         "User mentioned eye strain with light themes",
     ];
     for c in &contents {
-        run_cli_success(&server, &[
-            "remember", c, "--importance", "0.7", "--entity-id", "theme_prefs",
-        ]);
+        run_cli_success(
+            &server,
+            &[
+                "remember",
+                c,
+                "--importance",
+                "0.7",
+                "--entity-id",
+                "theme_prefs",
+            ],
+        );
     }
 
     // 1. Prepare: should produce session + clusters with actual content
     let prepare = run_cli_success(&server, &["reflect-prepare", "--entity-id", "theme_prefs"]);
 
-    let session_id = prepare["session_id"].as_str().expect("must return session_id");
+    let session_id = prepare["session_id"]
+        .as_str()
+        .expect("must return session_id");
     assert!(!session_id.is_empty());
 
     let processed = prepare["memories_processed"].as_u64().unwrap();
     assert_eq!(processed, 6, "all 6 memories should be processed");
 
-    let clusters = prepare["clusters"].as_array().expect("clusters must be array");
+    let clusters = prepare["clusters"]
+        .as_array()
+        .expect("clusters must be array");
     assert!(
         !clusters.is_empty(),
         "6 memories with min_cluster_size=2 MUST produce at least 1 cluster"
@@ -578,13 +792,22 @@ async fn skill_reflect_full_loop() {
 
     let cluster = &clusters[0];
     assert!(cluster["cluster_id"].as_u64().is_some());
-    assert!(cluster["member_count"].as_u64().unwrap() >= 2, "cluster must have >= 2 members");
+    assert!(
+        cluster["member_count"].as_u64().unwrap() >= 2,
+        "cluster must have >= 2 members"
+    );
 
     let prompt = cluster["proposal_system_prompt"].as_str().unwrap();
-    assert!(!prompt.is_empty(), "proposal_system_prompt must be non-empty");
+    assert!(
+        !prompt.is_empty(),
+        "proposal_system_prompt must be non-empty"
+    );
 
     let user_prompt = cluster["proposal_user_prompt"].as_str().unwrap();
-    assert!(!user_prompt.is_empty(), "proposal_user_prompt must be non-empty");
+    assert!(
+        !user_prompt.is_empty(),
+        "proposal_user_prompt must be non-empty"
+    );
 
     let mem_ids = cluster["memory_ids"].as_array().unwrap();
     assert!(mem_ids.len() >= 2, "cluster must reference >= 2 memory IDs");
@@ -593,7 +816,9 @@ async fn skill_reflect_full_loop() {
         assert_eq!(hex.len(), 32, "memory_id must be 32-char hex, got '{hex}'");
     }
 
-    let memories = cluster["memories"].as_array().expect("cluster must include memories array");
+    let memories = cluster["memories"]
+        .as_array()
+        .expect("cluster must include memories array");
     assert!(!memories.is_empty(), "memories array must be non-empty");
     for m in memories {
         assert!(m["memory_id"].is_string());
@@ -614,16 +839,30 @@ async fn skill_reflect_full_loop() {
     }])
     .to_string();
 
-    let commit = run_cli_success(&server, &[
-        "reflect-commit", "--session-id", session_id, "--insights", &insights_json,
-    ]);
+    let commit = run_cli_success(
+        &server,
+        &[
+            "reflect-commit",
+            "--session-id",
+            session_id,
+            "--insights",
+            &insights_json,
+        ],
+    );
     let created = commit["insights_created"].as_u64().unwrap();
     assert_eq!(created, 1, "should create exactly 1 insight");
 
     // 3. Verify the insight exists
-    let insights_output = run_cli_success(&server, &[
-        "insights", "--entity-id", "theme_prefs", "--max-results", "10",
-    ]);
+    let insights_output = run_cli_success(
+        &server,
+        &[
+            "insights",
+            "--entity-id",
+            "theme_prefs",
+            "--max-results",
+            "10",
+        ],
+    );
     let stdout = serde_json::to_string(&insights_output).unwrap();
     assert!(
         stdout.contains("dark themes") || stdout.contains("dark_theme"),
@@ -639,10 +878,22 @@ async fn skill_reflect_full_loop() {
 async fn skill_insights_empty_entity() {
     let server = TestServer::start().await;
 
-    let output = run_cli(&server, &[
-        "insights", "--entity-id", "nonexistent", "--max-results", "10", "--min-confidence", "0.5",
-    ]);
-    assert!(output.status.success(), "insights on empty entity should succeed");
+    let output = run_cli(
+        &server,
+        &[
+            "insights",
+            "--entity-id",
+            "nonexistent",
+            "--max-results",
+            "10",
+            "--min-confidence",
+            "0.5",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "insights on empty entity should succeed"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -657,7 +908,11 @@ async fn skill_forget_by_id_removes_memory() {
     let mem_id = extract_id(&mem);
 
     let forget = run_cli_success(&server, &["forget", "--ids", &mem_id]);
-    assert_eq!(forget["forgotten_count"].as_u64().unwrap(), 1, "should forget exactly 1");
+    assert_eq!(
+        forget["forgotten_count"].as_u64().unwrap(),
+        1,
+        "should forget exactly 1"
+    );
 
     let get_output = run_cli(&server, &["get", &mem_id]);
     assert!(
@@ -674,9 +929,18 @@ async fn skill_forget_by_id_removes_memory() {
 async fn skill_forget_by_entity_removes_all() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &["remember", "Note 1", "--entity-id", "old_project"]);
-    run_cli_success(&server, &["remember", "Note 2", "--entity-id", "old_project"]);
-    run_cli_success(&server, &["remember", "Note 3", "--entity-id", "old_project"]);
+    run_cli_success(
+        &server,
+        &["remember", "Note 1", "--entity-id", "old_project"],
+    );
+    run_cli_success(
+        &server,
+        &["remember", "Note 2", "--entity-id", "old_project"],
+    );
+    run_cli_success(
+        &server,
+        &["remember", "Note 3", "--entity-id", "old_project"],
+    );
 
     let forget = run_cli_success(&server, &["forget", "--entity-id", "old_project"]);
     assert_eq!(
@@ -694,17 +958,31 @@ async fn skill_forget_by_entity_removes_all() {
 async fn skill_forget_by_kind() {
     let server = TestServer::start().await;
 
-    run_cli_success(&server, &["remember", "Low importance episode", "--importance", "0.1"]);
-    run_cli_success(&server, &["remember", "High importance episode", "--importance", "0.9"]);
+    run_cli_success(
+        &server,
+        &["remember", "Low importance episode", "--importance", "0.1"],
+    );
+    run_cli_success(
+        &server,
+        &["remember", "High importance episode", "--importance", "0.9"],
+    );
 
-    let output = run_cli(&server, &[
-        "forget", "--kind", "episode", "--decay-floor", "0.5",
-    ]);
-    assert!(output.status.success(), "forget by kind failed: {}", String::from_utf8_lossy(&output.stderr));
+    let output = run_cli(
+        &server,
+        &["forget", "--kind", "episode", "--decay-floor", "0.5"],
+    );
+    assert!(
+        output.status.success(),
+        "forget by kind failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_default();
     let count = json["forgotten_count"].as_u64().unwrap_or(0);
-    assert!(count >= 1, "should forget at least the low-importance episode (decay <= 0.5)");
+    assert!(
+        count >= 1,
+        "should forget at least the low-importance episode (decay <= 0.5)"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -725,7 +1003,10 @@ async fn skill_forget_by_staleness_accepts_flag() {
     );
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_default();
-    assert!(json["forgotten_count"].is_number(), "must return forgotten_count");
+    assert!(
+        json["forgotten_count"].is_number(),
+        "must return forgotten_count"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -737,48 +1018,112 @@ async fn skill_agent_lifecycle() {
     let server = TestServer::start().await;
 
     // ── 1. Prime (conversation start) ──
-    let prime_output = run_cli(&server, &[
-        "prime", "customer_42", "--max-memories", "20", "--similarity-cue", "account overview",
-    ]);
-    assert!(prime_output.status.success(), "prime should succeed even with empty entity");
+    let prime_output = run_cli(
+        &server,
+        &[
+            "prime",
+            "customer_42",
+            "--max-memories",
+            "20",
+            "--similarity-cue",
+            "account overview",
+        ],
+    );
+    assert!(
+        prime_output.status.success(),
+        "prime should succeed even with empty entity"
+    );
 
     // ── 2. Remember facts from the conversation ──
-    run_cli_success(&server, &[
-        "remember", "Customer prefers email over phone",
-        "--importance", "0.8", "--entity-id", "customer_42",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "Customer budget is 50k per quarter",
-        "--importance", "0.9", "--entity-id", "customer_42",
-        "--context", r#"{"source":"sales_call"}"#,
-    ]);
-    run_cli_success(&server, &[
-        "remember", "Customer interested in premium tier",
-        "--importance", "0.7", "--entity-id", "customer_42",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "Customer mentioned previous vendor was too slow",
-        "--importance", "0.6", "--entity-id", "customer_42",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "Customer wants quarterly business reviews",
-        "--importance", "0.5", "--entity-id", "customer_42",
-    ]);
-    run_cli_success(&server, &[
-        "remember", "Customer timeline: decision by end of Q2",
-        "--importance", "0.8", "--entity-id", "customer_42",
-    ]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Customer prefers email over phone",
+            "--importance",
+            "0.8",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Customer budget is 50k per quarter",
+            "--importance",
+            "0.9",
+            "--entity-id",
+            "customer_42",
+            "--context",
+            r#"{"source":"sales_call"}"#,
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Customer interested in premium tier",
+            "--importance",
+            "0.7",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Customer mentioned previous vendor was too slow",
+            "--importance",
+            "0.6",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Customer wants quarterly business reviews",
+            "--importance",
+            "0.5",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "Customer timeline: decision by end of Q2",
+            "--importance",
+            "0.8",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
 
     // ── 3. Recall before answering ──
-    let recall_output = run_cli(&server, &[
-        "recall", "What is the customer's budget?",
-        "--strategy", "similarity",
-        "--top-k", "5",
-        "--entity-id", "customer_42",
-    ]);
+    let recall_output = run_cli(
+        &server,
+        &[
+            "recall",
+            "What is the customer's budget?",
+            "--strategy",
+            "similarity",
+            "--top-k",
+            "5",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
     assert!(recall_output.status.success());
     let recall_results = parse_recall_results(&recall_output);
-    assert!(!recall_results.is_empty(), "recall must return results for entity with 6 memories");
+    assert!(
+        !recall_results.is_empty(),
+        "recall must return results for entity with 6 memories"
+    );
 
     // ── 4. Reflect: prepare → commit ──
     let prepare = run_cli_success(&server, &["reflect-prepare", "--entity-id", "customer_42"]);
@@ -791,8 +1136,10 @@ async fn skill_agent_lifecycle() {
     );
 
     let hex_ids: Vec<&str> = clusters[0]["memory_ids"]
-        .as_array().unwrap()
-        .iter().take(2)
+        .as_array()
+        .unwrap()
+        .iter()
+        .take(2)
         .filter_map(|v| v.as_str())
         .collect();
 
@@ -804,15 +1151,29 @@ async fn skill_agent_lifecycle() {
     }])
     .to_string();
 
-    let commit = run_cli_success(&server, &[
-        "reflect-commit", "--session-id", session_id, "--insights", &insights_json,
-    ]);
+    let commit = run_cli_success(
+        &server,
+        &[
+            "reflect-commit",
+            "--session-id",
+            session_id,
+            "--insights",
+            &insights_json,
+        ],
+    );
     assert!(commit["insights_created"].as_u64().unwrap() >= 1);
 
     // ── 5. Verify insights ──
-    let insights = run_cli(&server, &[
-        "insights", "--entity-id", "customer_42", "--max-results", "5",
-    ]);
+    let insights = run_cli(
+        &server,
+        &[
+            "insights",
+            "--entity-id",
+            "customer_42",
+            "--max-results",
+            "5",
+        ],
+    );
     assert!(insights.status.success());
     let stdout = String::from_utf8_lossy(&insights.stdout);
     assert!(
@@ -821,17 +1182,30 @@ async fn skill_agent_lifecycle() {
     );
 
     // ── 6. Correction ──
-    run_cli_success(&server, &[
-        "remember", "CORRECTION: budget is actually 75k per quarter",
-        "--importance", "0.95", "--entity-id", "customer_42",
-    ]);
+    run_cli_success(
+        &server,
+        &[
+            "remember",
+            "CORRECTION: budget is actually 75k per quarter",
+            "--importance",
+            "0.95",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
 
     // Verify correction is retrievable
-    let recall2 = run_cli(&server, &[
-        "recall", "budget",
-        "--strategy", "similarity",
-        "--entity-id", "customer_42",
-    ]);
+    let recall2 = run_cli(
+        &server,
+        &[
+            "recall",
+            "budget",
+            "--strategy",
+            "similarity",
+            "--entity-id",
+            "customer_42",
+        ],
+    );
     assert!(recall2.status.success());
 
     // ── 7. Cleanup ──
@@ -844,5 +1218,9 @@ async fn skill_agent_lifecycle() {
     // Verify entity is clean
     let prime_after = run_cli(&server, &["prime", "customer_42", "--max-memories", "10"]);
     let after_results = parse_recall_results(&prime_after);
-    assert_eq!(after_results.len(), 0, "entity should be empty after forget");
+    assert_eq!(
+        after_results.len(),
+        0,
+        "entity should be empty after forget"
+    );
 }

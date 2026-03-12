@@ -180,11 +180,17 @@ pub struct ReflectSessionStore {
     inner: Mutex<HashMap<String, ReflectSession>>,
 }
 
-impl ReflectSessionStore {
-    pub fn new() -> Self {
+impl Default for ReflectSessionStore {
+    fn default() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
         }
+    }
+}
+
+impl ReflectSessionStore {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub(crate) fn create(&self, session: ReflectSession) -> String {
@@ -415,10 +421,7 @@ pub(crate) fn run_reflect_shared(
     };
 
     for produced in &output.insights {
-        let effective_entity_id = match &scope_entity_id {
-            Some(eid) => Some(eid.as_str()),
-            None => None,
-        };
+        let effective_entity_id = scope_entity_id.as_deref();
         let inferred;
         let effective_entity_id = match effective_entity_id {
             Some(eid) => Some(eid),
@@ -510,7 +513,8 @@ pub(crate) fn reflect_prepare_shared(
     let existing_count = existing_insights.len();
 
     let entries: Vec<MemoryEntry> = memories.iter().map(memory_to_entry).collect();
-    let existing_entries: Vec<MemoryEntry> = existing_insights.iter().map(memory_to_entry).collect();
+    let existing_entries: Vec<MemoryEntry> =
+        existing_insights.iter().map(memory_to_entry).collect();
 
     let embeddings: Vec<Vec<f32>> = entries
         .iter()
@@ -531,12 +535,11 @@ pub(crate) fn reflect_prepare_shared(
         silhouette_subsample: 500,
     };
 
-    let raw_clusters = cluster_embeddings(&embeddings, &cluster_config).map_err(|e| {
-        HebbsError::Internal {
+    let raw_clusters =
+        cluster_embeddings(&embeddings, &cluster_config).map_err(|e| HebbsError::Internal {
             operation: "reflect_prepare",
             message: format!("clustering failed: {e}"),
-        }
-    })?;
+        })?;
 
     let pipeline_config = config.to_pipeline_config();
     let mut prepared = Vec::with_capacity(raw_clusters.len());
@@ -634,12 +637,12 @@ pub(crate) fn reflect_commit_shared(
     session_id: &str,
     insights: Vec<hebbs_reflect::ProducedInsight>,
 ) -> Result<ReflectCommitResult> {
-    let session = session_store.take(session_id).ok_or_else(|| {
-        HebbsError::InvalidInput {
+    let session = session_store
+        .take(session_id)
+        .ok_or_else(|| HebbsError::InvalidInput {
             operation: "reflect_commit",
             message: format!("session '{session_id}' not found or expired"),
-        }
-    })?;
+        })?;
 
     let all_valid_ids: std::collections::HashSet<[u8; 16]> = session
         .cluster_members

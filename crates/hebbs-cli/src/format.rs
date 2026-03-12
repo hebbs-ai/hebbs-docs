@@ -405,7 +405,11 @@ impl Renderer {
     }
 
     /// Render a list of memories. JSON format outputs a JSON array.
-    pub fn render_memories(&self, memories: &[pb::Memory], w: &mut dyn Write) -> std::io::Result<()> {
+    pub fn render_memories(
+        &self,
+        memories: &[pb::Memory],
+        w: &mut dyn Write,
+    ) -> std::io::Result<()> {
         match self.format {
             OutputFormat::Json => {
                 let json_values: Vec<MemoryJson> =
@@ -652,16 +656,11 @@ impl Renderer {
                     writeln!(
                         w,
                         "\n  Cluster {}: {} members",
-                        c.cluster_id,
-                        c.member_count,
+                        c.cluster_id, c.member_count,
                     )?;
                     for m in &c.memories {
                         let preview = truncate_content(&m.content, 60);
-                        writeln!(
-                            w,
-                            "    [{:.2}] {} — {}",
-                            m.importance, m.memory_id, preview,
-                        )?;
+                        writeln!(w, "    [{:.2}] {} — {}", m.importance, m.memory_id, preview,)?;
                     }
                 }
                 Ok(())
@@ -697,7 +696,11 @@ impl Renderer {
                     "clusters": clusters,
                     "existing_insight_count": resp.existing_insight_count,
                 });
-                writeln!(w, "{}", serde_json::to_string_pretty(&json).unwrap_or_default())
+                writeln!(
+                    w,
+                    "{}",
+                    serde_json::to_string_pretty(&json).unwrap_or_default()
+                )
             }
             OutputFormat::Raw => writeln!(w, "{:?}", resp),
         }

@@ -152,12 +152,32 @@ pub async fn execute(
         Commands::Subscribe {
             entity_id,
             confidence,
-        } => execute_subscribe(conn, renderer, entity_id, confidence, tenant_id, &mut stdout).await,
+        } => {
+            execute_subscribe(
+                conn,
+                renderer,
+                entity_id,
+                confidence,
+                tenant_id,
+                &mut stdout,
+            )
+            .await
+        }
 
         Commands::Feed {
             subscription_id,
             text,
-        } => execute_feed(conn, renderer, subscription_id, text, tenant_id, &mut stdout).await,
+        } => {
+            execute_feed(
+                conn,
+                renderer,
+                subscription_id,
+                text,
+                tenant_id,
+                &mut stdout,
+            )
+            .await
+        }
 
         Commands::Reflect {
             entity_id,
@@ -176,8 +196,15 @@ pub async fn execute(
             session_id,
             insights,
         } => {
-            execute_reflect_commit(conn, renderer, &session_id, &insights, tenant_id, &mut stdout)
-                .await
+            execute_reflect_commit(
+                conn,
+                renderer,
+                &session_id,
+                &insights,
+                tenant_id,
+                &mut stdout,
+            )
+            .await
         }
 
         Commands::Insights {
@@ -199,7 +226,9 @@ pub async fn execute(
 
         Commands::Status => execute_status(conn, renderer, &mut stdout).await,
 
-        Commands::Inspect { id } => execute_inspect(conn, renderer, &id, tenant_id, &mut stdout).await,
+        Commands::Inspect { id } => {
+            execute_inspect(conn, renderer, &id, tenant_id, &mut stdout).await
+        }
 
         Commands::Export { entity_id, limit } => {
             execute_export(conn, renderer, entity_id, limit, tenant_id, &mut stdout).await
@@ -413,8 +442,7 @@ async fn execute_recall(
 
     let cue_context = match context {
         Some(ref c) => Some(
-            format::parse_context_json(c)
-                .map_err(|e| CliError::InvalidArgument { message: e })?,
+            format::parse_context_json(c).map_err(|e| CliError::InvalidArgument { message: e })?,
         ),
         None => None,
     };

@@ -126,11 +126,8 @@ impl MemoryService for MemoryServiceImpl {
                 self.metrics.observe_operation("recall", "ok", elapsed);
 
                 let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
-                let lineage = convert::resolve_lineage_batch_refs(
-                    &self.engine,
-                    &tenant_clone,
-                    &memories_ref,
-                );
+                let lineage =
+                    convert::resolve_lineage_batch_refs(&self.engine, &tenant_clone, &memories_ref);
                 let results: Vec<pb::RecallResult> = output
                     .results
                     .iter()
@@ -186,11 +183,8 @@ impl MemoryService for MemoryServiceImpl {
                 self.metrics.observe_operation("prime", "ok", elapsed);
 
                 let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
-                let lineage = convert::resolve_lineage_batch_refs(
-                    &self.engine,
-                    &tenant_clone,
-                    &memories_ref,
-                );
+                let lineage =
+                    convert::resolve_lineage_batch_refs(&self.engine, &tenant_clone, &memories_ref);
                 let results: Vec<pb::RecallResult> = output
                     .results
                     .iter()

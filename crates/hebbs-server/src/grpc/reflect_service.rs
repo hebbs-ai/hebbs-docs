@@ -105,11 +105,8 @@ impl ReflectService for ReflectServiceImpl {
                 self.metrics
                     .observe_operation("get_insights", "ok", elapsed);
 
-                let lineage = convert::resolve_lineage_batch(
-                    &self.engine,
-                    &tenant_clone,
-                    &insights,
-                );
+                let lineage =
+                    convert::resolve_lineage_batch(&self.engine, &tenant_clone, &insights);
                 let proto_insights: Vec<pb::Memory> = insights
                     .iter()
                     .map(|m| {

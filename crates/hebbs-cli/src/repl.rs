@@ -329,7 +329,8 @@ async fn handle_dot_command(
         }
         ".status" => {
             let _exit_code =
-                commands::execute(cli::Commands::Status, conn, renderer, http_port, tenant_id).await;
+                commands::execute(cli::Commands::Status, conn, renderer, http_port, tenant_id)
+                    .await;
         }
         ".clear" => {
             print!("\x1B[2J\x1B[H");

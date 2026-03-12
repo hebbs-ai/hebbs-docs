@@ -582,11 +582,8 @@ async fn recall_handler(
             state.metrics.observe_operation("recall", "ok", elapsed);
 
             let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
-            let lineage = convert::resolve_lineage_batch_refs(
-                &state.engine,
-                &tenant_clone,
-                &memories_ref,
-            );
+            let lineage =
+                convert::resolve_lineage_batch_refs(&state.engine, &tenant_clone, &memories_ref);
             let results: Vec<RecallResultJson> = output
                 .results
                 .iter()
@@ -637,8 +634,7 @@ async fn prime_handler(
 
     let engine = state.engine.clone();
     let tenant_clone = tenant.clone();
-    let result =
-        tokio::task::spawn_blocking(move || engine.prime_for_tenant(&tenant, input)).await;
+    let result = tokio::task::spawn_blocking(move || engine.prime_for_tenant(&tenant, input)).await;
 
     match result {
         Ok(Ok(output)) => {
@@ -646,11 +642,8 @@ async fn prime_handler(
             state.metrics.observe_operation("prime", "ok", elapsed);
 
             let memories_ref: Vec<_> = output.results.iter().map(|r| &r.memory).collect();
-            let lineage = convert::resolve_lineage_batch_refs(
-                &state.engine,
-                &tenant_clone,
-                &memories_ref,
-            );
+            let lineage =
+                convert::resolve_lineage_batch_refs(&state.engine, &tenant_clone, &memories_ref);
             let results: Vec<RecallResultJson> = output
                 .results
                 .iter()
@@ -829,11 +822,7 @@ async fn insights_handler(
 
     match result {
         Ok(Ok(insights)) => {
-            let lineage = convert::resolve_lineage_batch(
-                &state.engine,
-                &tenant_clone,
-                &insights,
-            );
+            let lineage = convert::resolve_lineage_batch(&state.engine, &tenant_clone, &insights);
             let json: Vec<MemoryJson> = insights
                 .iter()
                 .map(|m| {
@@ -943,9 +932,10 @@ async fn reflect_prepare_handler(
     };
 
     let engine = state.engine.clone();
-    let result =
-        tokio::task::spawn_blocking(move || engine.reflect_prepare_for_tenant(&tenant, scope, &config))
-            .await;
+    let result = tokio::task::spawn_blocking(move || {
+        engine.reflect_prepare_for_tenant(&tenant, scope, &config)
+    })
+    .await;
 
     match result {
         Ok(Ok(output)) => {
@@ -960,13 +950,17 @@ async fn reflect_prepare_handler(
                     memory_ids: c.memory_ids.iter().map(hex::encode).collect(),
                     validation_context: serde_json::from_str(&c.validation_context)
                         .unwrap_or(serde_json::Value::Null),
-                    memories: c.memories.iter().map(|m| ClusterMemoryJson {
-                        memory_id: hex::encode(m.memory_id),
-                        content: m.content.clone(),
-                        importance: m.importance,
-                        entity_id: m.entity_id.clone(),
-                        created_at: m.created_at,
-                    }).collect(),
+                    memories: c
+                        .memories
+                        .iter()
+                        .map(|m| ClusterMemoryJson {
+                            memory_id: hex::encode(m.memory_id),
+                            content: m.content.clone(),
+                            importance: m.importance,
+                            entity_id: m.entity_id.clone(),
+                            created_at: m.created_at,
+                        })
+                        .collect(),
                 })
                 .collect();
 

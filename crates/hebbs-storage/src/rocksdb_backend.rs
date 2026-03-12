@@ -48,10 +48,7 @@ impl RocksDbBackend {
             if !parent.exists() {
                 return Err(StorageError::Io {
                     operation: "open",
-                    message: format!(
-                        "parent directory does not exist: {}",
-                        parent.display()
-                    ),
+                    message: format!("parent directory does not exist: {}", parent.display()),
                     source: None,
                 });
             }
@@ -61,11 +58,7 @@ impl RocksDbBackend {
         if !path.exists() {
             std::fs::create_dir_all(path).map_err(|e| StorageError::Io {
                 operation: "open",
-                message: format!(
-                    "cannot create data directory {}: {}",
-                    path.display(),
-                    e
-                ),
+                message: format!("cannot create data directory {}: {}", path.display(), e),
                 source: Some(Box::new(e)),
             })?;
         }
@@ -93,10 +86,7 @@ impl RocksDbBackend {
         if meta.permissions().readonly() {
             return Err(StorageError::Io {
                 operation: "open",
-                message: format!(
-                    "data directory is read-only: {}",
-                    path.display()
-                ),
+                message: format!("data directory is read-only: {}", path.display()),
                 source: None,
             });
         }

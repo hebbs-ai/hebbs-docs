@@ -68,8 +68,7 @@ fn main() {
         match cli.command {
             Some(cmd) => {
                 let exit_code =
-                    commands::execute(cmd, &mut conn, &renderer, config.http_port, tenant_id)
-                        .await;
+                    commands::execute(cmd, &mut conn, &renderer, config.http_port, tenant_id).await;
                 std::process::exit(exit_code);
             }
             None => {

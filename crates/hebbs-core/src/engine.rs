@@ -59,7 +59,6 @@ const ENTITY_OVERSAMPLE: usize = 4;
 /// Bounded per Principle 4 to cap the O(n * d) brute-force scan.
 const PRIME_ENTITY_SCAN_LIMIT: usize = 500;
 
-
 /// Input for the `remember()` operation.
 ///
 /// Separating input from the stored `Memory` struct keeps the public
@@ -927,8 +926,7 @@ impl Engine {
                 match Self::get_from_storage(&*storage, memory_id) {
                     Ok(mem) => {
                         if let Some(ref emb) = mem.embedding {
-                            let relevance =
-                                cosine_similarity(&cue_embedding, emb).max(0.0);
+                            let relevance = cosine_similarity(&cue_embedding, emb).max(0.0);
                             scored.push((mem, relevance));
                         }
                     }
@@ -938,10 +936,7 @@ impl Engine {
             }
 
             // Sort by relevance descending, take top similarity_limit.
-            scored.sort_by(|a, b| {
-                b.1.partial_cmp(&a.1)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             scored.truncate(similarity_limit);
             similarity_memories = scored;
         }
@@ -2682,8 +2677,12 @@ impl Engine {
                         }
                     }
                     let embedding_similarity = (1.0 - distance).max(0.0);
-                    let structural_similarity =
-                        compute_structural_similarity(&cue_ctx, &mem, &analogical_weights, entity_id);
+                    let structural_similarity = compute_structural_similarity(
+                        &cue_ctx,
+                        &mem,
+                        &analogical_weights,
+                        entity_id,
+                    );
                     let relevance = analogical_weights.alpha * embedding_similarity
                         + (1.0 - analogical_weights.alpha) * structural_similarity;
 
@@ -2985,9 +2984,7 @@ fn compute_structural_similarity(
         let tm = if !shared_keys.is_empty() {
             let matches = shared_keys
                 .iter()
-                .filter(|k| {
-                    json_type_matches(&cue_context[k.as_str()], &mem_context[k.as_str()])
-                })
+                .filter(|k| json_type_matches(&cue_context[k.as_str()], &mem_context[k.as_str()]))
                 .count();
             matches as f32 / shared_keys.len() as f32
         } else {
@@ -4314,8 +4311,10 @@ mod tests {
             ..mem_same.clone()
         };
 
-        let score_same = compute_structural_similarity(&cue_ctx, &mem_same, &weights, Some("proj-alpha"));
-        let score_diff = compute_structural_similarity(&cue_ctx, &mem_diff, &weights, Some("proj-alpha"));
+        let score_same =
+            compute_structural_similarity(&cue_ctx, &mem_same, &weights, Some("proj-alpha"));
+        let score_diff =
+            compute_structural_similarity(&cue_ctx, &mem_diff, &weights, Some("proj-alpha"));
 
         assert!(
             score_same > score_diff,
