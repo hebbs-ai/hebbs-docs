@@ -416,4 +416,30 @@ result = await hb.index("./entities/acme-corp")
 # {"uploaded": 3, "files": ["call-notes.md", "emails.md", "proposal.md"]}
 ```
 
+#### `upload(local_path, remote_path=None)`
+
+Upload a single file with path control. The `remote_path` determines where the file is stored in the workspace vault.
+
+```python
+await hb.upload("./meeting.md", remote_path="entities/acme/meeting.md")
+```
+
+#### `file_status(remote_path)`
+
+Check indexing status for a specific file. Returns `status` (`"indexed"`, `"indexing"`, `"pending"`, `"not_found"`), `sections`, `sections_synced`, `memories`, and `last_indexed`.
+
+```python
+status = await hb.file_status("entities/acme/meeting.md")
+if status["status"] == "indexed":
+    print(f"Ready: {status['memories']} memories")
+```
+
+#### `delete_file(remote_path)`
+
+Delete a file from the workspace and forget its memories.
+
+```python
+await hb.delete_file("entities/acme/old-notes.md")
+```
+
 The `HebbsRestClient` also supports `remember()`, `recall()`, `prime()`, `forget()`, and `insights()` over REST, with the same signatures as the gRPC `HebbsClient`.
