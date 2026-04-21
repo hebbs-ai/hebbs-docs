@@ -425,32 +425,4 @@ Upload files for server-side indexing. Files are uploaded via multipart POST to 
 
 **Returns:** `RestUploadResult` with `uploaded` (count) and `files` (list of filenames)
 
-#### `upload(name: string, content: Uint8Array): Promise<RestUploadResult>`
-
-Upload a single file with path control. The `name` determines where the file is stored in the workspace vault.
-
-```typescript
-const content = new Uint8Array(await fs.readFile("./meeting.md"));
-await hb.upload("entities/acme/meeting.md", content);
-```
-
-#### `fileStatus(remotePath: string): Promise<FileStatus>`
-
-Check indexing status for a specific file. Returns `status` (`"indexed"`, `"indexing"`, `"pending"`, `"not_found"`), `sections`, `sections_synced`, `memories`, and `last_indexed`.
-
-```typescript
-const status = await hb.fileStatus("entities/acme/meeting.md");
-if (status.status === "indexed") {
-  console.log(`Ready: ${status.memories} memories`);
-}
-```
-
-#### `deleteFile(remotePath: string): Promise<{ deleted: string; message: string }>`
-
-Delete a file from the workspace and forget its memories.
-
-```typescript
-await hb.deleteFile("entities/acme/old-notes.md");
-```
-
 The `HebbsRestClient` also supports `remember()`, `recall()`, `prime()`, `forget()`, and `insights()` over REST, with the same signatures as the gRPC `HebbsClient`.
