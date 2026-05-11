@@ -1,6 +1,6 @@
 # HEBBS Documentation Examples
 
-Runnable companion code for the [HEBBS documentation](https://docs.hebbs.ai) cookbooks and SDK guides.
+Runnable companion code for the [HEBBS documentation](https://memdocs.hebbs.ai) cookbooks and SDK guides.
 
 ## Prerequisites
 
